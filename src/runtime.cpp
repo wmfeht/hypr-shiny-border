@@ -25,8 +25,16 @@ int shinyResolvedBorderSize(int configured, int generalBorderSize) {
     return generalBorderSize;
 }
 
-float shinyShaderThick(float logicalPx, float monitorScale) {
-    return logicalPx * monitorScale;
+int shinyEffectiveBorderSize(int resolvedPx, bool enabled, bool activeOnly, bool focused) {
+    if (!enabled)
+        return 0;
+    if (activeOnly && !focused)
+        return 0;
+    return resolvedPx;
+}
+
+float shinyShaderThick(float logicalPx, float monitorScale, float modifScale) {
+    return logicalPx * monitorScale * modifScale;
 }
 
 float shinyGpuHeading(float pointerX, float pointerY, float centerX, float centerY) {
@@ -38,16 +46,23 @@ float shinyQuantizeHeading(float radians, int offsetDeg, int degStep) {
     const float pi   = std::acos(-1.f);
     float       deg  = std::fmod(std::fmod(radians * 180.f / pi, 360.f) + 360.f, 360.f);
     deg              = std::floor((deg + static_cast<float>(offsetDeg)) / static_cast<float>(step)) * static_cast<float>(step);
+    deg              = std::fmod(std::fmod(deg, 360.f) + 360.f, 360.f);
     return deg * pi / 180.f;
 }
 
-bool shinyShouldDamageHeading(float latched, float nextQuantized) {
-    return std::fabs(nextQuantized - latched) >= 1e-4f;
+bool shinyShouldDamageHeading(float latched, float next) {
+    float       d    = std::fabs(next - latched);
+    const float pi   = std::acos(-1.f);
+    const float turn = 2.f * pi;
+    d                = std::fmod(d, turn);
+    if (d > pi)
+        d = turn - d; // shortest arc
+    return d >= 1e-4f;
 }
 
-ShinyUpdateActions shinyUpdateWindowActions(const ShinyGeoLatch& now, int borderSize, const ShinyGeoLatch& last,
-                                            int lastBorderSize) {
-    const bool borderChanged = (borderSize != lastBorderSize);
+ShinyUpdateActions shinyUpdateWindowActions(const ShinyGeoLatch& now, int effectiveBorder, const ShinyGeoLatch& last,
+                                            int lastEffectiveBorder) {
+    const bool borderChanged = (effectiveBorder != lastEffectiveBorder);
     const bool geoChanged    = (now.posX != last.posX || now.posY != last.posY || now.sizeX != last.sizeX ||
                                 now.sizeY != last.sizeY);
     return ShinyUpdateActions{
@@ -68,18 +83,19 @@ ShinyDrawBackends shinyMapDrawBackends(const ShinyDrawShared& p, float monitorSc
     return out;
 }
 
-bool shinyPulseShouldRun(bool enabled, bool pulse, bool activeOnly, bool focused) {
-    if (!enabled || !pulse)
+bool shinyPulseShouldRun(bool enabled, bool pulse, float pulseHz, bool activeOnly, bool focused) {
+    if (!enabled || !pulse || pulseHz <= 0.f)
         return false;
     if (activeOnly && !focused)
         return false;
     return true;
 }
 
-ShinyPulseUniforms shinyPulseUniforms(bool pulse, float clockSeconds, float configuredHz) {
-    if (!pulse)
+ShinyPulseUniforms shinyPulseUniforms(bool pulse, double clockSeconds, float hz) {
+    if (!pulse || hz <= 0.f)
         return {.time = 0.f, .pulseHz = 0.f};
-    return {.time = clockSeconds, .pulseHz = configuredHz};
+    const double wrapped = std::fmod(clockSeconds, 1.0 / static_cast<double>(hz));
+    return {.time = static_cast<float>(wrapped), .pulseHz = hz};
 }
 
 int shinyPulseTickMs(float pulseHz) {

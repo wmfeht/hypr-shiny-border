@@ -42,8 +42,8 @@ uniform float thick;
 uniform float time;
 uniform float alpha;
 uniform float range;             // angular half-width as fraction of the circle (0.08–0.45)
-uniform float brightness;        // pulse Hz
-uniform vec2  pointer_position;  // gl_FragCoord space; heading vs box center
+uniform float brightness;        // pulse Hz; <= 0 is the nominal ring
+uniform float angle;             // latched heading, radians, already quantized + offset
 
 const float TAU = 6.28318530718;
 const float AA  = 1.25;
@@ -63,24 +63,26 @@ void main() {
     vec2 center = topLeft + fullSize * 0.5;
     vec2 p      = gl_FragCoord.xy - center;
 
-    // GPU pointer is the source of truth. Always face pointer vs box center,
-    // including when pointer_position is at the transformed origin.
-    vec2  dir     = pointer_position - center;
-    float heading = atan(-dir.y, dir.x);
+    float heading = angle;
 
     float ang = atan(-p.y, p.x);
     float t   = fract((ang - heading) / TAU); // 0 at the mouse-facing head
     float d0  = min(t, 1.0 - t);              // 0..0.5 around the circle
 
-    float pulse  = 0.5 + 0.5 * sin(time * brightness * TAU);
-    float spread = mix(range * 0.45, range * 1.35, pulse);
-    spread       = max(spread, 0.04);
+    float pulse, spread, thickNow;
+    if (brightness <= 0.0) {
+        spread   = max(range, 0.04);
+        thickNow = thick;
+    } else {
+        pulse    = 0.5 + 0.5 * sin(time * brightness * TAU);
+        spread   = max(mix(range * 0.45, range * 1.35, pulse), 0.04);
+        thickNow = thick * mix(0.78, 1.18, pulse);
+    }
 
     float cone = 1.0 - smoothstep(0.0, spread, d0);
     cone       = pow(max(cone, 0.0), 1.65);
 
     // Thickness breathes, and the comet is locally thicker than the rest of the ring.
-    float thickNow = thick * mix(0.78, 1.18, pulse);
     float localT   = mix(thickNow * 0.38, thickNow, mix(0.15, 1.0, cone));
     localT         = max(localT, 1.0);
 
@@ -89,9 +91,8 @@ void main() {
     vec2  bOut = fullSize * 0.5;
     vec2  bIn  = max(bOut - vec2(localT), vec2(0.5));
 
-    float power = max(roundingPower, 2.0);
-    float dOut  = sdRoundBox(p, bOut, rOut, power);
-    float dIn   = sdRoundBox(p, bIn, rIn, power);
+    float dOut  = sdRoundBox(p, bOut, rOut, roundingPower);
+    float dIn   = sdRoundBox(p, bIn, rIn, roundingPower);
 
     // Client area: inside the inner contour. Never paint window contents.
     if (dIn < -AA)

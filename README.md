@@ -26,7 +26,11 @@ relative to the window.
   `render.pre` scan
 
 `active_only` (default on) means only the focused window tracks the cursor and
-pulses. Stock `border` / `borderangle` animations must stay off, or Hyprland
+pulses. Unfocused windows have **no** ring and **no** reserved padding — they
+sit flush. There is no inactive shiny border. `enabled = false` also reserves
+0 px, so turning the plugin off does not leave a gap.
+
+Stock `border` / `borderangle` animations must stay off, or Hyprland
 interpolates the color and the highlight lags the mouse. Zero
 `general:border_size` as well — otherwise you get two rings.
 
@@ -35,11 +39,13 @@ A plugin crash is a compositor crash. Develop in the nested session.
 ## Build
 
 Needs Hyprland headers, `pkg-config`, and the compositor’s `g++` (`gnu++26`,
-`-fno-gnu-unique`).
+`-fno-gnu-unique`). Logic tests do not: they compile `runtime.cpp` /
+`teardown.cpp` only.
 
 ```sh
 mise run build     # make -j$(nproc) → hypr-shiny-border.so
-mise run test      # compositor-free unit tests
+mise run test      # compositor-free logic tests (no headers, no .so)
+mise run test-full # + pluginctl reload harness (needs the .so / nest box)
 mise run headers   # running compositor hash vs installed headers
 ```
 
@@ -120,10 +126,10 @@ if shinyLoaded() then
         enabled      = true,
         active_only  = true,
         pulse        = true,
-        pulse_hz     = 0.4,  -- oscillation rate
+        pulse_hz     = 0.4,  -- 0 disables oscillation (same as pulse = false for the timer)
         lobe         = 0.18, -- highlight half-width as a fraction of the circle
-        quantize_deg = 1,    -- 5 is cheaper if it chatters
-        angle_offset = 0,    -- add 90 if the head faces the wrong way
+        quantize_deg = 1,    -- snap heading; applies while pulse is on; 5 is cheaper
+        angle_offset = 0,    -- degrees added to the comet heading; 90 if the head is flipped
         border_size  = 1,    -- px; plugin default is 3; -1 = general:border_size
         col = {
           a = "rgba(33ccffee)", -- highlight head
@@ -139,13 +145,13 @@ end
 
 | Key | Default | |
 |---|---|---|
-| `enabled` | `true` | master switch |
-| `active_only` | `true` | only the focused window tracks / pulses |
+| `enabled` | `true` | master switch; `false` reserves 0 px (no gap) |
+| `active_only` | `true` | only the focused window tracks / pulses; unfocused are flush |
 | `pulse` | `true` | breathe highlight width and thickness |
-| `pulse_hz` | `0.4` | oscillation rate |
+| `pulse_hz` | `0.4` | oscillation rate; `0` disables (same as `pulse = false` for the timer) |
 | `lobe` | `0.18` | highlight half-width (fraction of the circle) |
-| `quantize_deg` | `1` | snap heading; larger is cheaper |
-| `angle_offset` | `0` | degrees added to `atan2` |
+| `quantize_deg` | `1` | snap heading to this many degrees; applies while pulse is on; larger is cheaper |
+| `angle_offset` | `0` | degrees added to the comet heading (shader and fallback) |
 | `border_size` | `3` | px; `-1` follows `general:border_size` |
 | `col.a` | `rgba(33ccffee)` | comet head |
 | `col.b` | `rgba(00ff99ee)` | comet shoulder |
@@ -186,7 +192,7 @@ src/pass.*       CShinyPassElement, shader compile
 src/teardown.*   teardown mark + shader lifecycle
 src/runtime.*    mapped-window / VAO guards
 src/shaders.hpp  vertex + conic comet fragment
-tests/           unit tests (no compositor)
+tests/           compositor-free logic tests; mise run test-full adds pluginctl
 nest/hyprland.lua
 scripts/pluginctl.sh
 ```

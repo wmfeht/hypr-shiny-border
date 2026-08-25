@@ -11,11 +11,12 @@ class CShinyPassElement : public IPassElement {
         // Shared rounding / colors / logical thickness / alpha. Filled from
         // shinyMapDrawBackends().shader — not a parallel copy of those fields.
         // shared.borderSize is logical (unscaled) px. CShinyPassElement::draw
-        // uploads shinyShaderThick(shared.borderSize, mon->m_scale) — scale once.
-        // Do not store already-scaled px here.
+        // uploads shinyShaderThick(shared.borderSize, mon->m_scale, combinedScale()).
+        // Rounding / outerRound are already monitor-scaled; draw multiplies
+        // combinedScale() at upload. Do not store already-scaled borderSize.
         ShinyDrawShared shared;
-        CBox            box; // scaled, monitor-local, outer
-        Vector2D        pointer = {}; // scaled, same space as box (pre-GL transform)
+        CBox            box;      // scaled, monitor-local, outer; includes m_floatingOffset
+        float           angle   = 0.f; // latched heading, radians, quantized + offset
         float           time    = 0.f;
         float           pulseHz = 0.4f;
         float           lobe    = 0.18f;
@@ -45,3 +46,4 @@ class CShinyPassElement : public IPassElement {
 bool ensureShinyShader();
 void destroyShinyShader();
 void markShinyTeardown();
+void shinyResetLifecycle();

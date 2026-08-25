@@ -22,6 +22,7 @@ class CShinyBorder : public IHyprWindowDecoration {
     void                               setAngle(float radians);
     float                              angle() const;
     void                               syncPulse();
+    void                               syncExtents();
 
   private:
     PHLWINDOWREF        m_window;
@@ -29,11 +30,12 @@ class CShinyBorder : public IHyprWindowDecoration {
     SBoxExtents         m_extents          = {};
     Vector2D            m_lastPos;
     Vector2D            m_lastSize;
-    float               m_angle     = 0.f; // radians, math convention: 0 = +x
-    int                 m_lastSizeB = -1;
+    float               m_angle          = 0.f; // radians, math convention: 0 = +x
+    int                 m_lastEffectiveB = -1;  // last reserved extent px
     SP<CEventLoopTimer> m_pulseTimer;
 
     int                 borderSize() const;
+    int                 effectiveBorderSize() const;
     CBox                assignedBoxGlobal();
     bool                pulseWanted() const;
     void                startPulse();

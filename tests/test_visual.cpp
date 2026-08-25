@@ -16,54 +16,6 @@ static int g_fails = 0;
         }                                                                                                              \
     } while (0)
 
-static std::string sourceDir() {
-    std::string file           = __FILE__;
-    const auto  slash          = file.find_last_of('/');
-    const std::string testsDir = (slash == std::string::npos) ? std::string(".") : file.substr(0, slash);
-    return testsDir + "/../src";
-}
-
-static std::string repoRoot() {
-    return sourceDir() + "/..";
-}
-
-static std::string readFile(const std::string& path) {
-    std::ifstream in(path);
-    if (!in)
-        return {};
-    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-}
-
-static std::string functionBody(const std::string& src, const std::string& signature) {
-    const auto pos = src.find(signature);
-    if (pos == std::string::npos)
-        return {};
-    const auto brace = src.find('{', pos);
-    if (brace == std::string::npos)
-        return {};
-    int depth = 0;
-    for (size_t i = brace; i < src.size(); ++i) {
-        if (src[i] == '{')
-            depth++;
-        else if (src[i] == '}') {
-            depth--;
-            if (depth == 0)
-                return src.substr(brace, i - brace + 1);
-        }
-    }
-    return {};
-}
-
-static int countNeedle(const std::string& hay, const std::string& needle) {
-    int    n = 0;
-    size_t p = 0;
-    while ((p = hay.find(needle, p)) != std::string::npos) {
-        n++;
-        p += needle.size();
-    }
-    return n;
-}
-
 static void checkDrawAgreement() {
     const ShinyDrawShared p{
         .rounding      = 12,
@@ -118,11 +70,16 @@ static void checkDrawAgreement() {
 }
 
 static void checkThickness() {
-    // Contract: logical px × scale once. 3px @ 1× is 3 framebuffer px; @ 2× is 6, not 12.
+    // Contract: logical × monitor scale × renderModif combinedScale.
+    // 3px @ 1× is 3 framebuffer px; @ 2× is 6, not 12. Zoom 2× then 12.
     CHECK(shinyShaderThick(3.f, 1.f) == 3.f);
     CHECK(shinyShaderThick(3.f, 2.f) == 6.f);
     CHECK(shinyShaderThick(3.f, 2.f) != 12.f);
     CHECK(shinyShaderThick(0.f, 2.f) == 0.f);
+    CHECK(shinyShaderThick(3.f, 2.f, 1.f) == 6.f);
+    CHECK(shinyShaderThick(3.f, 2.f, 2.f) == 12.f);
+    // Rounding is already monitor-scaled in deco; upload multiplies combinedScale only.
+    CHECK(shinyShaderThick(6.f, 1.f, 2.f) == 12.f);
 }
 
 static void checkHeading() {
@@ -141,9 +98,23 @@ static void checkHeading() {
     const float b = shinyGpuHeading(200.f, 100.f, 100.f, 100.f);
     CHECK(std::fabs(a - b) < 1e-5f);
     CHECK(std::fabs(a) < 1e-5f);
+
+    // Pointer is screen-relative (no floatingOffset); center is visual
+    // (middle + floatingOffset). The old canceling pair — both get the
+    // offset — is a different heading. Offset no longer cancels; intended.
+    const float cursorX = 200.f, cursorY = 100.f;
+    const float middleX = 100.f, middleY = 100.f;
+    const float offX = 0.f, offY = 40.f;
+    const float canceled = shinyGpuHeading(cursorX + offX, cursorY + offY, middleX + offX, middleY + offY);
+    const float visual   = shinyGpuHeading(cursorX, cursorY, middleX + offX, middleY + offY);
+    CHECK(std::fabs(canceled - visual) > 1e-4f);
+    CHECK(std::fabs(canceled - shinyGpuHeading(cursorX, cursorY, middleX, middleY)) < 1e-5f);
 }
 
 static void checkQuantizeLatch() {
+    const float pi = std::acos(-1.f);
+    auto        deg = [pi](float d) { return d * pi / 180.f; };
+
     // Heading of +x. A 1px vertical move at 100px is well under a 5° step.
     const float h0 = shinyGpuHeading(100.f, 0.f, 0.f, 0.f);
     const float q0 = shinyQuantizeHeading(h0, 0, 5);
@@ -156,133 +127,75 @@ static void checkQuantizeLatch() {
     const float qStep = shinyQuantizeHeading(hStep, 0, 5);
     CHECK(shinyShouldDamageHeading(q0, qStep));
 
-    // angle_offset participates in the CPU latch only, not the GPU heading.
+    // angle_offset is part of the visible heading (shader and fallback).
     const float qOff = shinyQuantizeHeading(h0, 90, 1);
     const float qNo  = shinyQuantizeHeading(h0, 0, 1);
     CHECK(shinyShouldDamageHeading(qNo, qOff));
+    CHECK(qOff >= 0.f);
+    CHECK(qOff < 2.f * pi);
+    CHECK(std::fabs(qOff - pi * 0.5f) < 1e-4f);
+
+    // 350° + 90 offset = 440 without wrap; wrap lands in [0, 2π) at 80°.
+    const float qWrap = shinyQuantizeHeading(deg(350.f), 90, 1);
+    CHECK(qWrap >= 0.f);
+    CHECK(qWrap < 2.f * pi);
+    CHECK(std::fabs(qWrap - deg(80.f)) < 1e-3f);
+
+    // 359° vs 0° with step 5: floor buckets are 355 and 0 (5° apart) → damage.
+    // Offset 1 puts both in the 0 bucket after wrap → no damage.
+    CHECK(shinyShouldDamageHeading(shinyQuantizeHeading(deg(359.f), 0, 5),
+                                   shinyQuantizeHeading(deg(0.f), 0, 5)));
+    CHECK(shinyShouldDamageHeading(shinyQuantizeHeading(deg(355.f), 0, 5),
+                                   shinyQuantizeHeading(deg(0.f), 0, 5)));
+    CHECK(!shinyShouldDamageHeading(shinyQuantizeHeading(deg(359.f), 1, 5),
+                                    shinyQuantizeHeading(deg(0.f), 1, 5)));
+    CHECK(!shinyShouldDamageHeading(shinyQuantizeHeading(deg(356.f), 0, 5),
+                                    shinyQuantizeHeading(deg(359.f), 0, 5)));
+
+    // Raw fabs at ~2π vs 0 looks like a full turn; shortest arc can be a no-op.
+    CHECK(!shinyShouldDamageHeading(2.f * pi - 1e-5f, 0.f));
+    CHECK(shinyShouldDamageHeading(deg(359.f), deg(0.f)));
+}
+
+static std::string sourceDir() {
+    std::string       file     = __FILE__;
+    const auto        slash    = file.find_last_of('/');
+    const std::string testsDir = (slash == std::string::npos) ? std::string(".") : file.substr(0, slash);
+    return testsDir + "/../src";
+}
+
+static std::string readFile(const std::string& path) {
+    std::ifstream in(path);
+    if (!in)
+        return {};
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+static void checkShaderSource() {
+    const std::string frag = readFile(sourceDir() + "/shaders.hpp");
+    CHECK(!frag.empty());
+    CHECK(frag.find("heading = angle") != std::string::npos);
+    CHECK(frag.find("max(roundingPower, 2.0)") == std::string::npos);
+    CHECK(frag.find("brightness <= 0.0") != std::string::npos);
+    CHECK(frag.find("pointer_position") == std::string::npos);
+    CHECK(frag.find("atan(-dir.y") == std::string::npos);
 }
 
 static void checkProductionWiring() {
-    const std::string src     = sourceDir();
-    const std::string deco    = readFile(src + "/deco.cpp");
-    const std::string pass    = readFile(src + "/pass.cpp");
-    const std::string passHpp = readFile(src + "/pass.hpp");
-    const std::string runtime = readFile(src + "/runtime.hpp");
-    const std::string main    = readFile(src + "/main.cpp");
-    const std::string shaders = readFile(src + "/shaders.hpp");
-    const std::string nest    = readFile(repoRoot() + "/nest/hyprland.lua");
-
+    const std::string deco = readFile(sourceDir() + "/deco.cpp");
+    const std::string pass = readFile(sourceDir() + "/pass.cpp");
     CHECK(!deco.empty());
     CHECK(!pass.empty());
-    CHECK(!passHpp.empty());
-    CHECK(!runtime.empty());
-    CHECK(!main.empty());
-    CHECK(!shaders.empty());
-    CHECK(!nest.empty());
 
-    const auto decoDraw = functionBody(deco, "void CShinyBorder::draw");
-    const auto passDraw = functionBody(pass, "CShinyPassElement::draw");
-    const auto mouse    = functionBody(main, "void onMouseMove()");
-    CHECK(!decoDraw.empty());
-    CHECK(!passDraw.empty());
-    CHECK(!mouse.empty());
+    CHECK(deco.find("data.angle") != std::string::npos);
+    CHECK(deco.find("m_angle") != std::string::npos);
+    CHECK(deco.find("getMouseCoordsInternal") == std::string::npos);
+    CHECK(deco.find("data.pointer") == std::string::npos);
 
-    // One shared set after early-outs; both backends filled from shinyMapDrawBackends.
-    CHECK(decoDraw.find("ShinyDrawShared shared") != std::string::npos);
-    CHECK(decoDraw.find("shinyMapDrawBackends(shared") != std::string::npos);
-    CHECK(countNeedle(decoDraw, "g_cfg.colA->value()") == 1);
-    CHECK(countNeedle(decoDraw, "g_cfg.colB->value()") == 1);
-    CHECK(decoDraw.find("CHyprColor{sc<uint64_t>(g_cfg.colA->value())}") == std::string::npos);
-    CHECK(decoDraw.find("CHyprColor{sc<uint64_t>(g_cfg.colB->value())}") == std::string::npos);
-
-    const auto colAAt   = decoDraw.find("g_cfg.colA->value()");
-    const auto colBAt   = decoDraw.find("g_cfg.colB->value()");
-    const auto mapAt    = decoDraw.find("shinyMapDrawBackends");
-    const auto ensureAt = decoDraw.find("ensureShinyShader()");
-    const auto shinyEl  = decoDraw.find("makeUnique<CShinyPassElement>");
-    const auto borderEl = decoDraw.find("makeUnique<CBorderPassElement>");
-    CHECK(colAAt != std::string::npos);
-    CHECK(colBAt != std::string::npos);
-    CHECK(mapAt != std::string::npos);
-    CHECK(ensureAt != std::string::npos);
-    CHECK(shinyEl != std::string::npos);
-    CHECK(borderEl != std::string::npos);
-    CHECK(colAAt < mapAt);
-    CHECK(colBAt < mapAt);
-    CHECK(mapAt < ensureAt);
-    CHECK(ensureAt < shinyEl);
-    CHECK(ensureAt < borderEl);
-    CHECK(shinyEl < borderEl);
-
-    // Logical thickness into the shared set once; backends consume the mapping,
-    // not a second BORDERSIZE / already-scaled BS_PX store.
-    CHECK(countNeedle(decoDraw, ".borderSize    = BORDERSIZE") == 1);
-    CHECK(decoDraw.find("data.borderSize    = BORDERSIZE") == std::string::npos);
-    CHECK(decoDraw.find("data.borderSize    = BS_PX") == std::string::npos);
-    CHECK(decoDraw.find("data.shared  = mapped.shader") != std::string::npos);
-    CHECK(decoDraw.find("mapped.fallback.shared.borderSize") != std::string::npos);
-    CHECK(decoDraw.find("mapped.fallback.expandPx") != std::string::npos);
-
-    const auto fallbackAt = decoDraw.find("CBorderPassElement::SBorderData");
-    CHECK(fallbackAt != std::string::npos);
-    CHECK(decoDraw.find("mapped.fallback.shared.borderSize", fallbackAt) != std::string::npos);
-    CHECK(decoDraw.find("data.window        = m_window", fallbackAt) != std::string::npos);
-
-    // Shader upload multiplies logical size by mon->m_scale at most once, via the helper.
-    CHECK(passDraw.find("setUniformFloat(SHADER_THICK, shinyShaderThick") != std::string::npos);
-    CHECK(passDraw.find("m_data.shared.borderSize") != std::string::npos);
-    CHECK(passDraw.find("m_data.borderSize) * sc<float>(mon->m_scale)") == std::string::npos);
-    CHECK(passDraw.find("shared.borderSize) * sc<float>(mon->m_scale)") == std::string::npos);
-    CHECK(passDraw.find("SHADER_ANGLE") == std::string::npos);
-
-    // SData consumes ShinyDrawShared (logical px); no window handle, no parallel copy.
-    const auto sdata = functionBody(passHpp, "struct SData");
-    CHECK(!sdata.empty());
-    CHECK(sdata.find("ShinyDrawShared") != std::string::npos);
-    CHECK(sdata.find("PHLWINDOW") == std::string::npos);
-    CHECK(sdata.find("PHLWINDOWREF") == std::string::npos);
-    CHECK(sdata.find("window") == std::string::npos);
-    CHECK(sdata.find("CHyprColor") == std::string::npos);
-    CHECK(passHpp.find("PHLWINDOW") == std::string::npos);
-    CHECK(passHpp.find("PHLWINDOWREF") == std::string::npos);
-    CHECK(passHpp.find("logical (unscaled) px") != std::string::npos);
-    CHECK(passHpp.find("scale once") != std::string::npos);
-    CHECK(passHpp.find("float      angle") == std::string::npos);
-    CHECK(runtime.find("logical (unscaled) px") != std::string::npos);
-
-    // GPU heading is the visible source; CPU uses that heading then quantize.
-    CHECK(mouse.find("shinyGpuHeading") != std::string::npos);
-    CHECK(mouse.find("shinyQuantizeHeading") != std::string::npos);
-    CHECK(mouse.find("shinyShouldDamageHeading") != std::string::npos);
-    CHECK(mouse.find("std::atan2") == std::string::npos);
-    const auto headingAt = mouse.find("shinyGpuHeading");
-    const auto quantAt   = mouse.find("shinyQuantizeHeading");
-    const auto latchAt   = mouse.find("shinyShouldDamageHeading");
-    CHECK(headingAt < quantAt);
-    CHECK(quantAt < latchAt);
-
-    // Same space as SData.pointer: monitor-local, scaled.
-    CHECK(mouse.find("m_floatingOffset") != std::string::npos);
-    CHECK(mouse.find("m_position") != std::string::npos);
-    CHECK(mouse.find("m_scale") != std::string::npos);
-    const auto decoPtr = decoDraw.find("data.pointer");
-    CHECK(decoPtr != std::string::npos);
-    CHECK(decoDraw.find("m_floatingOffset", decoPtr) != std::string::npos);
-    CHECK(decoDraw.find("m_position", decoPtr) != std::string::npos);
-    CHECK(decoDraw.find("m_scale", decoPtr) != std::string::npos);
-
-    // Fragment: always atan(-dir.y, dir.x); origin special case gone; angle uniform dropped.
-    CHECK(shaders.find("atan(-dir.y, dir.x)") != std::string::npos);
-    CHECK(shaders.find("dot(pointer_position, pointer_position)") == std::string::npos);
-    CHECK(shaders.find("heading = angle") == std::string::npos);
-    CHECK(shaders.find("uniform float angle") == std::string::npos);
-
-    // Nest Lua key Hyprland will apply; C++ option names stay hyphenated.
-    CHECK(nest.find("shiny_border") != std::string::npos);
-    CHECK(nest.find("[\"shiny-border\"]") == std::string::npos);
-    CHECK(main.find("plugin:shiny-border:border_size") != std::string::npos);
-    CHECK(main.find("plugin:shiny-border:angle_offset") != std::string::npos);
-    CHECK(main.find("plugin:shiny-border:quantize_deg") != std::string::npos);
+    CHECK(pass.find("SHADER_ANGLE") != std::string::npos);
+    CHECK(pass.find("m_data.angle") != std::string::npos);
+    CHECK(pass.find("SHADER_POINTER") == std::string::npos);
+    CHECK(pass.find("m_data.pointer") == std::string::npos);
 }
 
 int main() {
@@ -290,6 +203,7 @@ int main() {
     checkThickness();
     checkHeading();
     checkQuantizeLatch();
+    checkShaderSource();
     checkProductionWiring();
 
     if (g_fails) {

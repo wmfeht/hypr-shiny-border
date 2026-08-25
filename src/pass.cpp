@@ -48,6 +48,11 @@ static void hyprResetShader() {
     g_shinyShader.reset();
 }
 
+static void hyprAbandonShader() {
+    // Deliberate leak: empty the static without ~CShader / glDelete*.
+    (void)new SP<CShader>(std::move(g_shinyShader));
+}
+
 [[gnu::constructor]] static void bindShinyShaderOps() {
     shinySetShaderOps({
         .glAlive     = hyprGlAlive,
@@ -55,6 +60,7 @@ static void hyprResetShader() {
         .shaderLive  = hyprShaderLive,
         .compile     = hyprCompileShader,
         .reset       = hyprResetShader,
+        .abandon     = hyprAbandonShader,
     });
 }
 
@@ -74,7 +80,7 @@ bool CShinyPassElement::disableSimplification() {
 
 std::optional<CBox> CShinyPassElement::boundingBox() {
     if (!g_pHyprRenderer->m_renderData.pMonitor)
-        return m_data.box;
+        return std::nullopt;
     return m_data.box.copy().scale(1.F / g_pHyprRenderer->m_renderData.pMonitor->m_scale).round();
 }
 
@@ -96,11 +102,10 @@ std::vector<UP<IPassElement>> CShinyPassElement::draw() {
 
     const auto proj = g_pHyprRenderer->projectBoxToTarget(box);
 
-    CBox transformed = m_data.box;
-    transformed.transform(Math::wlTransformToHyprutils(Math::invertTransform(mon->m_transform)), mon->m_transformedSize.x, mon->m_transformedSize.y);
+    const auto inv = Math::wlTransformToHyprutils(Math::invertTransform(mon->m_transform));
 
-    CBox ptrBox{m_data.pointer.x, m_data.pointer.y, 1, 1};
-    ptrBox.transform(Math::wlTransformToHyprutils(Math::invertTransform(mon->m_transform)), mon->m_transformedSize.x, mon->m_transformedSize.y);
+    CBox transformed = box;
+    transformed.transform(inv, mon->m_transformedSize.x, mon->m_transformedSize.y);
 
     g_pHyprOpenGL->blend(true);
     auto shader = g_pHyprOpenGL->useShader(g_shinyShader);
@@ -109,21 +114,22 @@ std::vector<UP<IPassElement>> CShinyPassElement::draw() {
 
     const CHyprColor colA{m_data.shared.colA};
     const CHyprColor colB{m_data.shared.colB};
+    const float      modifScale = rd.renderModif.combinedScale();
 
     shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_TRUE, proj.getMatrix());
     shader->setUniformFloat4(SHADER_COLOR, sc<float>(colA.r), sc<float>(colA.g), sc<float>(colA.b), sc<float>(colA.a));
     shader->setUniformFloat4(SHADER_COLOR_SRGB, sc<float>(colB.r), sc<float>(colB.g), sc<float>(colB.b), sc<float>(colB.a));
     shader->setUniformFloat2(SHADER_TOP_LEFT, sc<float>(transformed.x), sc<float>(transformed.y));
     shader->setUniformFloat2(SHADER_FULL_SIZE, sc<float>(transformed.width), sc<float>(transformed.height));
-    shader->setUniformFloat(SHADER_RADIUS, sc<float>(m_data.shared.rounding));
-    shader->setUniformFloat(SHADER_RADIUS_OUTER, sc<float>(m_data.shared.outerRound));
+    shader->setUniformFloat(SHADER_RADIUS, sc<float>(m_data.shared.rounding) * modifScale);
+    shader->setUniformFloat(SHADER_RADIUS_OUTER, sc<float>(m_data.shared.outerRound) * modifScale);
     shader->setUniformFloat(SHADER_ROUNDING_POWER, m_data.shared.roundingPower);
-    shader->setUniformFloat(SHADER_THICK, shinyShaderThick(sc<float>(m_data.shared.borderSize), sc<float>(mon->m_scale)));
+    shader->setUniformFloat(SHADER_THICK, shinyShaderThick(sc<float>(m_data.shared.borderSize), sc<float>(mon->m_scale), modifScale));
     shader->setUniformFloat(SHADER_TIME, m_data.time);
     shader->setUniformFloat(SHADER_ALPHA, m_data.shared.a);
     shader->setUniformFloat(SHADER_RANGE, m_data.lobe);
     shader->setUniformFloat(SHADER_BRIGHTNESS, m_data.pulseHz);
-    shader->setUniformFloat2(SHADER_POINTER, sc<float>(ptrBox.x), sc<float>(ptrBox.y));
+    shader->setUniformFloat(SHADER_ANGLE, m_data.angle);
 
     const GLint vao = shader->getUniformLocation(SHADER_SHADER_VAO);
     if (!shinyCanBindVao(vao))

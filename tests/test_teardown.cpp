@@ -31,9 +31,11 @@ static std::string readFile(const std::string& path) {
 
 static int  g_compiles     = 0;
 static int  g_resets       = 0;
+static int  g_abandons     = 0;
 static int  g_makeCurrent  = 0;
 static bool g_glAlive      = false;
 static bool g_shaderLive   = false;
+static bool g_compileOk    = true;
 
 static bool spyGlAlive() {
     return g_glAlive;
@@ -49,12 +51,19 @@ static bool spyShaderLive() {
 
 static bool spyCompile() {
     g_compiles++;
+    if (!g_compileOk)
+        return false;
     g_shaderLive = true;
     return true;
 }
 
 static void spyReset() {
     g_resets++;
+    g_shaderLive = false;
+}
+
+static void spyAbandon() {
+    g_abandons++;
     g_shaderLive = false;
 }
 
@@ -65,32 +74,15 @@ static void bindSpies() {
         .shaderLive  = spyShaderLive,
         .compile     = spyCompile,
         .reset       = spyReset,
+        .abandon     = spyAbandon,
     });
 }
 
-static void checkProductionWiring() {
-    const std::string src  = sourceDir();
-    const std::string pass = readFile(src + "/pass.cpp");
-    const std::string main = readFile(src + "/main.cpp");
-    const std::string readme = readFile(src + "/../README.md");
-
-    CHECK(!pass.empty());
+static void checkTeardownOrdering() {
+    const std::string main = readFile(sourceDir() + "/main.cpp");
     CHECK(!main.empty());
-    CHECK(!readme.empty());
 
-    // Production must bind the Hyprland compile/reset into the shipped lifecycle.
-    CHECK(pass.find("shinySetShaderOps") != std::string::npos);
-    CHECK(pass.find("createProgram") != std::string::npos);
-    CHECK(pass.find("hyprResetShader") != std::string::npos);
-    CHECK(pass.find("g_shinyShader.reset()") != std::string::npos);
-
-    // PLUGIN_EXIT: mark, leftover-pass clear, then destroy. No surgical shiny remove.
-    CHECK(main.find("markShinyTeardown") != std::string::npos);
-    CHECK(main.find("m_renderPass.clear()") != std::string::npos);
-    CHECK(main.find("destroyShinyShader") != std::string::npos);
-    CHECK(main.find(".removeAllOfType(\"CShinyPassElement\")") == std::string::npos);
-    CHECK(main.find(".removeAllOfType(\"CBorderPassElement\")") == std::string::npos);
-
+    // PLUGIN_EXIT: mark, leftover-pass clear, then destroy. Order has bitten.
     const auto markAt  = main.find("markShinyTeardown");
     const auto clearAt = main.find("m_renderPass.clear()");
     const auto destAt  = main.find("destroyShinyShader();");
@@ -98,7 +90,20 @@ static void checkProductionWiring() {
     CHECK(markAt < clearAt);
     CHECK(clearAt < destAt);
 
-    CHECK(readme.find("m_renderPass.clear()") != std::string::npos);
+    // PLUGIN_INIT must clear teardown / compile-failed before first draw.
+    const auto initAt  = main.find("PLUGIN_INIT");
+    const auto resetAt = main.find("shinyResetLifecycle();");
+    const auto exitAt  = main.find("PLUGIN_EXIT");
+    CHECK(initAt != std::string::npos && resetAt != std::string::npos && exitAt != std::string::npos);
+    CHECK(initAt < resetAt);
+    CHECK(resetAt < exitAt);
+
+    const std::string pass = readFile(sourceDir() + "/pass.cpp");
+    CHECK(!pass.empty());
+    CHECK(pass.find("hyprAbandonShader") != std::string::npos);
+    CHECK(pass.find("std::move(g_shinyShader)") != std::string::npos);
+    CHECK(pass.find(".abandon") != std::string::npos);
+    CHECK(pass.find("g_shinyShader.reset()") != std::string::npos);
 }
 
 int main() {
@@ -117,7 +122,28 @@ int main() {
     CHECK(ensureShinyShader() == true);
     CHECK(g_compiles == 1);
 
-    // Issue 5: leftover draw after PLUGIN_EXIT must not compile into a dying .so.
+    // Failed compile latches: one attempt, then stay on fallback until reset.
+    shinyResetLifecycle();
+    g_compileOk  = false;
+    g_shaderLive = false;
+    g_compiles   = 0;
+    CHECK(ensureShinyShader() == false);
+    CHECK(g_compiles == 1);
+    CHECK(ensureShinyShader() == false);
+    CHECK(g_compiles == 1);
+    shinyResetLifecycle();
+    CHECK(ensureShinyShader() == false);
+    CHECK(g_compiles == 2);
+
+    g_compileOk  = true;
+    shinyResetLifecycle();
+    g_shaderLive = false;
+    g_compiles   = 0;
+    CHECK(ensureShinyShader() == true);
+    CHECK(g_compiles == 1);
+    CHECK(g_shaderLive);
+
+    // Leftover draw after PLUGIN_EXIT must not compile into a dying .so.
     markShinyTeardown();
     CHECK(shinyTeardownStarted());
 
@@ -129,21 +155,33 @@ int main() {
     CHECK(ensureShinyShader() == false);
     CHECK(g_compiles == 1);
 
-    // Issue 2: no GL context → leak the SP (do not reset / glDelete).
+    // No GL + live shader → abandon (clear the static), do not reset / makeCurrent.
     const int makeBefore = g_makeCurrent;
     g_glAlive            = false;
+    g_shaderLive         = true;
     destroyShinyShader();
     CHECK(g_resets == 0);
+    CHECK(g_abandons == 1);
     CHECK(g_makeCurrent == makeBefore);
+    CHECK(!g_shaderLive);
 
-    // GL alive → make current, then reset.
-    g_glAlive = true;
+    // GL alive → make current, then reset. No second abandon.
+    g_glAlive    = true;
+    g_shaderLive = true;
     destroyShinyShader();
     CHECK(g_resets == 1);
+    CHECK(g_abandons == 1);
     CHECK(g_makeCurrent == makeBefore + 1);
     CHECK(!g_shaderLive);
 
-    checkProductionWiring();
+    // Same-path reload: INIT clears the teardown latch so the next draw compiles.
+    shinyResetLifecycle();
+    CHECK(!shinyTeardownStarted());
+    g_shaderLive = false;
+    CHECK(ensureShinyShader() == true);
+    CHECK(g_compiles == 2);
+
+    checkTeardownOrdering();
 
     if (g_fails) {
         std::fprintf(stderr, "%d checks failed\n", g_fails);

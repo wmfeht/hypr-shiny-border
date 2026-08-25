@@ -3,6 +3,7 @@
 #include "runtime.hpp"
 
 #include <algorithm>
+#include <chrono>
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
@@ -15,7 +16,6 @@
 #include <hyprland/src/helpers/memory/Memory.hpp>
 #include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
 #include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
-#include <hyprland/src/managers/input/InputManager.hpp>
 #include "pass.hpp"
 
 using namespace Hyprutils::Memory;
@@ -39,7 +39,8 @@ CShinyBorder::~CShinyBorder() {
 bool CShinyBorder::pulseWanted() const {
     const auto PWINDOW = m_window.lock();
     const bool focused = PWINDOW && PWINDOW == Desktop::focusState()->window();
-    return shinyPulseShouldRun(g_cfg.enabled->value(), g_cfg.pulse->value(), g_cfg.activeOnly->value(), focused);
+    return shinyPulseShouldRun(g_cfg.enabled->value(), g_cfg.pulse->value(), sc<float>(g_cfg.pulseHz->value()),
+                               g_cfg.activeOnly->value(), focused);
 }
 
 void CShinyBorder::startPulse() {
@@ -103,8 +104,22 @@ int CShinyBorder::borderSize() const {
     return shinyResolvedBorderSize(configured, general);
 }
 
+int CShinyBorder::effectiveBorderSize() const {
+    const auto PWINDOW = m_window.lock();
+    const bool focused = PWINDOW && PWINDOW == Desktop::focusState()->window();
+    return shinyEffectiveBorderSize(borderSize(), g_cfg.enabled->value(), g_cfg.activeOnly->value(), focused);
+}
+
+void CShinyBorder::syncExtents() {
+    const int bs = effectiveBorderSize();
+    if (bs == m_lastEffectiveB)
+        return;
+    m_lastEffectiveB = bs;
+    g_pDecorationPositioner->repositionDeco(this);
+}
+
 SDecorationPositioningInfo CShinyBorder::getPositioningInfo() {
-    const int bs = borderSize();
+    const int bs = effectiveBorderSize();
     m_extents    = {{bs, bs}, {bs, bs}};
 
     SDecorationPositioningInfo info;
@@ -186,16 +201,16 @@ void CShinyBorder::draw(PHLMONITOR pMonitor, float const& a) {
     const auto mapped = shinyMapDrawBackends(shared, pMonitor->m_scale);
 
     if (ensureShinyShader()) {
-        const auto cursor = g_pInputManager->getMouseCoordsInternal();
         CShinyPassElement::SData data;
-        data.shared  = mapped.shader;
-        data.box     = outerBox;
-        data.pointer = (cursor + PWINDOW->m_floatingOffset - pMonitor->m_position) * pMonitor->m_scale;
-        const auto pulseU = shinyPulseUniforms(g_cfg.pulse->value(), g_pHyprRenderer->m_globalTimer.getSeconds(),
-                                               sc<float>(g_cfg.pulseHz->value()));
+        data.shared = mapped.shader;
+        data.box    = outerBox;
+        data.angle  = m_angle;
+        const double seconds =
+            std::chrono::duration<double>(Time::steadyNow() - g_pHyprRenderer->m_globalTimer.chrono()).count();
+        const auto pulseU = shinyPulseUniforms(g_cfg.pulse->value(), seconds, sc<float>(g_cfg.pulseHz->value()));
         data.time         = pulseU.time;
         data.pulseHz      = pulseU.pulseHz;
-        data.lobe    = sc<float>(g_cfg.lobe->value());
+        data.lobe         = sc<float>(g_cfg.lobe->value());
         g_pHyprRenderer->addPassElement(makeUnique<CShinyPassElement>(data));
         return;
     }
@@ -224,16 +239,13 @@ eDecorationType CShinyBorder::getDecorationType() {
 void CShinyBorder::updateWindow(PHLWINDOW pWindow) {
     const auto pos  = pWindow->position(IGeometric::GEOMETRIC_CURRENT);
     const auto size = pWindow->size(IGeometric::GEOMETRIC_CURRENT);
-    const int  bs   = borderSize();
+    const int  bs   = effectiveBorderSize();
 
     const auto actions = shinyUpdateWindowActions(
         ShinyGeoLatch{pos.x, pos.y, size.x, size.y}, bs,
-        ShinyGeoLatch{m_lastPos.x, m_lastPos.y, m_lastSize.x, m_lastSize.y}, m_lastSizeB);
+        ShinyGeoLatch{m_lastPos.x, m_lastPos.y, m_lastSize.x, m_lastSize.y}, m_lastEffectiveB);
 
-    if (actions.reposition) {
-        m_lastSizeB = bs;
-        g_pDecorationPositioner->repositionDeco(this);
-    }
+    syncExtents();
 
     m_lastPos  = pos;
     m_lastSize = size;

@@ -11,12 +11,14 @@ struct ShinyShaderOps {
     bool (*shaderLive)()  = nullptr;
     bool (*compile)()     = nullptr;
     void (*reset)()       = nullptr;
+    void (*abandon)()     = nullptr;
 };
 
 void shinySetShaderOps(ShinyShaderOps ops);
 
 void markShinyTeardown();
 bool shinyTeardownStarted();
+void shinyResetLifecycle();
 
 bool ensureShinyShader();
 void destroyShinyShader();
