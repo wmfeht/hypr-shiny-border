@@ -6,6 +6,12 @@
 /compile_flags.txt
 /compile_commands.json
 
+# Built test binaries (sources are tests/test_*.cpp)
+/tests/test_teardown
+/tests/test_runtime
+/tests/test_reload
+/tests/test_visual
+
 # clangd / ccache
 .cache/
 .clangd/

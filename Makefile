@@ -1,4 +1,5 @@
 # Build against the Hyprland that pkg-config finds (Omarchy: /usr).
+# hyprpm.toml runs `make all` with PKG_CONFIG_PATH pointing at hyprpm's headers.
 # --no-gnu-unique is required so the plugin can actually unload.
 
 PLUGIN := hypr-shiny-border

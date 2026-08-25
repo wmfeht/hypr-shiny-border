@@ -1,11 +1,17 @@
 [repository]
 name = "hypr-shiny-border"
 authors = ["wmfeht"]
-# Pin Hyprland commit → this repo commit once you have releases.
-# commit_pins = [["efb50993780079460b0cbed1363e2166a2de1d9f", "YOUR_PLUGIN_COMMIT"]]
+# Pairs of [hyprland_commit, this_repo_commit]. hyprpm checks out the matching
+# plugin commit for the running compositor; if nothing matches, it builds HEAD.
+# Add a pin after the first release commit on the default branch, e.g.:
+# commit_pins = [
+#     ["efb50993780079460b0cbed1363e2166a2de1d9f", "PUT_PLUGIN_COMMIT_HERE"], # v0.56.2
+# ]
 
 [hypr-shiny-border]
-description = "Window border gradient that faces the cursor"
+description = "Gradient window border that faces the cursor"
 authors = ["wmfeht"]
 output = "hypr-shiny-border.so"
-build = ["make -j$(nproc)"]
+build = [
+    "make all",
+]
