@@ -47,6 +47,11 @@ description = "Rebuild, copy to a fresh path, unload+load (dodges dlopen cache)"
 run = "scripts/pluginctl.sh reload"
 depends = ["build"]
 
+[tasks.install]
+description = "Copy the .so to ~/.local/lib/hypr for the login session"
+run = "mkdir -p \"$HOME/.local/lib/hypr\" && cp -f hypr-shiny-border.so \"$HOME/.local/lib/hypr/hypr-shiny-border.so\""
+depends = ["build"]
+
 [tasks.nest]
 description = "Nested Hyprland with nest/hyprland.lua — crash sandbox"
 run = "Hyprland --config \"$MISE_PROJECT_ROOT/nest/hyprland.lua\""
