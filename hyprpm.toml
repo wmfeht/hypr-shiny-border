@@ -3,10 +3,11 @@ name = "hypr-shiny-border"
 authors = ["wmfeht"]
 # Pairs of [hyprland_commit, this_repo_commit]. hyprpm checks out the matching
 # plugin commit for the running compositor; if nothing matches, it builds HEAD.
-# Add a pin after the first release commit on the default branch, e.g.:
-# commit_pins = [
-#     ["efb50993780079460b0cbed1363e2166a2de1d9f", "PUT_PLUGIN_COMMIT_HERE"], # v0.56.2
-# ]
+# Verified 2026-08-25: hyprpm add git@github.com:wmfeht/hypr-shiny-border.git
+# built 4b0ee3de against running Hyprland v0.56.2 and hyprctl plugin list loaded it.
+commit_pins = [
+    ["efb50993780079460b0cbed1363e2166a2de1d9f", "4b0ee3dee710014a79ec1b28907d4bfd26561a20"], # v0.56.2
+]
 
 [hypr-shiny-border]
 description = "Gradient window border that faces the cursor"

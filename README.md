@@ -38,9 +38,10 @@ Use [`hyprpm`](https://wiki.hypr.land/Plugins/Using-Plugins/#hyprpm). It clones
 this repo, builds `hypr-shiny-border.so` against your running Hyprland commit,
 and loads it through `hyprctl plugin load`.
 
-`hyprpm add` clones the **default branch** (`main`). Pin a Hyprland commit to a
-plugin commit in `hyprpm.toml` after you cut a release; with no matching pin,
-hyprpm builds `HEAD`.
+`hyprpm add` clones the **default branch** (`main`). `hyprpm.toml` pins
+Hyprland **v0.56.2** (`efb50993780079460b0cbed1363e2166a2de1d9f`) to plugin
+commit `4b0ee3dee710014a79ec1b28907d4bfd26561a20`. If no pin matches, hyprpm
+builds `HEAD`.
 
 ```sh
 hyprpm update
@@ -60,8 +61,10 @@ allow hyprpm to load plugins or you get a popup every start:
 
 ```lua
 -- ~/.config/hypr/autostart.lua
-hl.permission("/usr/(bin|local/bin)/hyprpm", "plugin", "allow")
-hl.exec_once("hyprpm reload -n")
+hl.permission({ binary = "/usr/(bin|local/bin)/hyprpm", type = "plugin", mode = "allow" })
+hl.on("hyprland.start", function()
+  hl.exec_cmd("hyprpm reload -n")
+end)
 ```
 
 Do not also `hl.plugin.load` the same plugin — hyprpm already asks hyprctl to
