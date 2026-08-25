@@ -26,9 +26,10 @@ relative to the window.
   `render.pre` scan
 
 `active_only` (default on) means only the focused window tracks the cursor and
-pulses. Unfocused windows have **no** ring and **no** reserved padding — they
-sit flush. There is no inactive shiny border. `enabled = false` also reserves
-0 px, so turning the plugin off does not leave a gap.
+pulses. Unfocused windows have **no** ring, but they still reserve the same
+padding so focus does not reflow the client. There is no inactive shiny
+border. `enabled = false` reserves 0 px, so turning the plugin off does not
+leave a gap.
 
 Stock `border` / `borderangle` animations must stay off, or Hyprland
 interpolates the color and the highlight lags the mouse. Zero
@@ -146,7 +147,7 @@ end
 | Key | Default | |
 |---|---|---|
 | `enabled` | `true` | master switch; `false` reserves 0 px (no gap) |
-| `active_only` | `true` | only the focused window tracks / pulses; unfocused are flush |
+| `active_only` | `true` | only the focused window tracks / pulses; unfocused keep the padding, no ring |
 | `pulse` | `true` | breathe highlight width and thickness |
 | `pulse_hz` | `0.4` | oscillation rate; `0` disables (same as `pulse = false` for the timer) |
 | `lobe` | `0.18` | highlight half-width (fraction of the circle) |
