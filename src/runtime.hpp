@@ -26,28 +26,36 @@ bool shinyCanBindVao(int vao);
 // configured >= 0 wins (including 0 = no ring); -1 follows general.
 int shinyResolvedBorderSize(int configured, int generalBorderSize);
 
-// Shader-path ring thickness: logical px × monitor scale, once.
+// Reserved extent after enabled / active_only / focus. 0 if the plugin
+// is off, or active_only and this window is not focused. Otherwise
+// resolvedPx. Positioning uses this; drawing still uses the resolved px.
+int shinyEffectiveBorderSize(int resolvedPx, bool enabled, bool activeOnly, bool focused);
+
+// Shader-path ring thickness: logical × monitor scale × renderModif combinedScale.
 // SData.borderSize stores logical (unscaled) px; pass that in. Pre-scaling
 // it and multiplying again is the double-scale bug (3px @ 2× → 12).
-float shinyShaderThick(float logicalPx, float monitorScale);
+// combinedScale() is applied at upload in pass.cpp so deco does not need a
+// modif it cannot see. Default 1 is identity (no zoom / no workspace scale).
+float shinyShaderThick(float logicalPx, float monitorScale, float modifScale = 1.f);
 
-// Visible heading: GLSL atan(-dir.y, dir.x) from pointer vs box center.
-// Same space as SData.pointer / shader pointer_position. Pointer at the
-// transformed origin is still this atan — no CPU-angle fallback.
+// Heading from pointer vs box center, GLSL atan(-dir.y, dir.x) convention.
+// Live cursor feeds the mouse-move latch only — not the fragment.
 float shinyGpuHeading(float pointerX, float pointerY, float centerX, float centerY);
 
-// CPU damage latch: snap heading to degStep, with angle_offset. Visual
-// heading is shinyGpuHeading; this is not a second visible heading.
+// Visible heading: snap to degStep, add offset, wrap into [0, 2π).
+// Shader (SHADER_ANGLE) and fallback (m_angle) both draw this value.
 float shinyQuantizeHeading(float radians, int offsetDeg, int degStep);
 
 // True when the quantized heading moved enough to damage the ring.
-bool shinyShouldDamageHeading(float latched, float nextQuantized);
+// Compares on the circle so 359° vs 0° is one step, not a full turn.
+bool shinyShouldDamageHeading(float latched, float next);
 
 // Dirty-check used by CShinyBorder::updateWindow. Hyprland-free so tests
 // can drive the same decision the deco calls.
-// Reposition only when resolved border size changed (m_lastSizeB).
-// Damage when window pos/size or that border size changed.
-// Unchanged geometry + unchanged border → neither (unrelated config reload).
+// Reposition only when effective border size changed (m_lastEffectiveB).
+// Damage when window pos/size or that effective size changed.
+// Unchanged geometry + unchanged effective border → neither
+// (unrelated config reload).
 struct ShinyGeoLatch {
     double posX  = 0;
     double posY  = 0;
@@ -60,8 +68,8 @@ struct ShinyUpdateActions {
     bool damage     = false;
 };
 
-ShinyUpdateActions shinyUpdateWindowActions(const ShinyGeoLatch& now, int borderSize, const ShinyGeoLatch& last,
-                                            int lastBorderSize);
+ShinyUpdateActions shinyUpdateWindowActions(const ShinyGeoLatch& now, int effectiveBorder, const ShinyGeoLatch& last,
+                                            int lastEffectiveBorder);
 
 // Shared draw fields both backends consume. Colors are packed Hyprland
 // CHyprColor uint64 (same as sc<uint64_t>(g_cfg.colA->value())).
@@ -95,19 +103,19 @@ ShinyDrawBackends shinyMapDrawBackends(const ShinyDrawShared& p, float monitorSc
 int shinyFallbackExpandPx(int logicalPx, float monitorScale);
 
 // Per-deco pulse scheduler: should this deco keep a running pulse
-// (timer/avar that damageEntire's)? Pulse false or plugin off → no.
+// (timer that damageEntire's)? false if !enabled || !pulse || pulseHz <= 0.
 // active_only → only the focused deco; otherwise every mapped shiny deco.
-bool shinyPulseShouldRun(bool enabled, bool pulse, bool activeOnly, bool focused);
+bool shinyPulseShouldRun(bool enabled, bool pulse, float pulseHz, bool activeOnly, bool focused);
 
-// Shader time / pulseHz. Pulse off → both zero even if the clock and
-// configured Hz are non-zero. Pulse on → that clock and that Hz.
-// One clock: compositor m_globalTimer (or the animated value) — not a mix.
+// Shader time / pulseHz. Pulse off or hz <= 0 → both zero even if the
+// clock is non-zero. Otherwise wrap clockSeconds (double) to one 1/hz
+// period, then narrow. One clock: compositor m_globalTimer — not a mix.
 struct ShinyPulseUniforms {
     float time    = 0.f;
     float pulseHz = 0.f;
 };
 
-ShinyPulseUniforms shinyPulseUniforms(bool pulse, float clockSeconds, float configuredHz);
+ShinyPulseUniforms shinyPulseUniforms(bool pulse, double clockSeconds, float hz);
 
 // Re-arm period for per-deco pulse damage, milliseconds. Must be much
 // smaller than one sine cycle (1/pulseHz) so compositor-time sampling

@@ -50,8 +50,9 @@ static void onMouseMove() {
         if (!mon)
             continue;
 
-        // Same space as SData.pointer (monitor-local, scaled) vs window center.
-        const auto  pointer = (cursor + w->m_floatingOffset - mon->m_position) * mon->m_scale;
+        // Live cursor feeds the latch only. Screen-relative, no floatingOffset.
+        // Center is visual (middle + floatingOffset) so heading is cursor vs ring.
+        const auto  pointer = (cursor - mon->m_position) * mon->m_scale;
         const auto  center  = (w->middle() + w->m_floatingOffset - mon->m_position) * mon->m_scale;
         const float heading = shinyGpuHeading(sc<float>(pointer.x), sc<float>(pointer.y), sc<float>(center.x),
                                               sc<float>(center.y));
@@ -71,6 +72,10 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
 }
 
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
+    // Same-path load after unload can reuse the mapping; statics would stay
+    // teardown-forever / fallback-forever without this.
+    shinyResetLifecycle();
+
     PHANDLE = handle;
 
     const std::string HASH        = __hyprland_api_get_hash();
@@ -87,13 +92,13 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_cfg.enabled      = makeShared<Config::Values::CBoolValue>("plugin:shiny-border:enabled", "Master switch", true);
     g_cfg.activeOnly   = makeShared<Config::Values::CBoolValue>("plugin:shiny-border:active_only", "Only the focused window tracks the cursor", true);
     g_cfg.pulse        = makeShared<Config::Values::CBoolValue>("plugin:shiny-border:pulse", "Oscillate highlight width and thickness", true);
-    g_cfg.quantizeDeg  = makeShared<Config::Values::CIntValue>("plugin:shiny-border:quantize_deg", "Snap angle to this many degrees", 1,
+    g_cfg.quantizeDeg  = makeShared<Config::Values::CIntValue>("plugin:shiny-border:quantize_deg", "Snap heading to this many degrees; applies while pulse is on", 1,
                                                                Config::Values::SIntValueOptions{.min = 1, .max = 45});
-    g_cfg.angleOffset  = makeShared<Config::Values::CIntValue>("plugin:shiny-border:angle_offset", "Added to atan2 result, degrees", 0,
+    g_cfg.angleOffset  = makeShared<Config::Values::CIntValue>("plugin:shiny-border:angle_offset", "Degrees added to the comet heading", 0,
                                                                Config::Values::SIntValueOptions{.min = -180, .max = 180});
     g_cfg.borderSize   = makeShared<Config::Values::CIntValue>("plugin:shiny-border:border_size", "Border px, -1 = general:border_size", 3,
                                                                Config::Values::SIntValueOptions{.min = -1, .max = 20});
-    g_cfg.pulseHz      = makeShared<Config::Values::CFloatValue>("plugin:shiny-border:pulse_hz", "Oscillation rate", 0.4,
+    g_cfg.pulseHz      = makeShared<Config::Values::CFloatValue>("plugin:shiny-border:pulse_hz", "Oscillation rate; 0 disables", 0.4,
                                                                  Config::Values::SFloatValueOptions{.min = 0.f, .max = 4.f});
     g_cfg.lobe         = makeShared<Config::Values::CFloatValue>("plugin:shiny-border:lobe", "Highlight half-width as a fraction of the circle", 0.18,
                                                                 Config::Values::SFloatValueOptions{.min = 0.04, .max = 0.5});
@@ -122,6 +127,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_onFocus      = Event::bus()->m_events.window.active.listen([](PHLWINDOW, Desktop::eFocusReason) {
         for (auto& w : Desktop::windowState()->windows()) {
             if (auto* d = shinyOn(w)) {
+                d->syncExtents();
                 d->syncPulse();
                 d->damageEntire();
             }

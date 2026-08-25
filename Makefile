@@ -5,10 +5,12 @@ PLUGIN := hypr-shiny-border
 
 CXX      ?= g++
 PKG      := hyprland pixman-1 libdrm pangocairo
-CXXFLAGS ?= -std=gnu++26 -O2 -g -fPIC -fno-gnu-unique
-CXXFLAGS += -fdiagnostics-color=always -DWLR_USE_UNSTABLE
-CXXFLAGS += $(shell pkg-config --cflags $(PKG))
-LDFLAGS  ?= -shared
+CXXFLAGS ?= -O2 -g
+override CXXFLAGS += -std=gnu++26 -fPIC -fno-gnu-unique
+override CXXFLAGS += -fdiagnostics-color=always -DWLR_USE_UNSTABLE
+override CXXFLAGS += $(shell pkg-config --cflags $(PKG))
+LDFLAGS  ?=
+override LDFLAGS  += -shared
 LIBS     := $(shell pkg-config --libs $(PKG))
 
 SRC := $(wildcard src/*.cpp)
@@ -20,7 +22,7 @@ TEST_RELOAD   := tests/test_reload
 TEST_VISUAL   := tests/test_visual
 TESTS         := $(TEST_TEARDOWN) $(TEST_RUNTIME) $(TEST_RELOAD) $(TEST_VISUAL)
 
-.PHONY: all clean clangd test
+.PHONY: all clean clangd test test-logic test-full
 
 all: $(PLUGIN).so
 
@@ -31,11 +33,15 @@ obj/%.o: src/%.cpp src/*.hpp
 $(PLUGIN).so: $(OBJ)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-test: $(PLUGIN).so $(TESTS)
+test-logic: $(TEST_TEARDOWN) $(TEST_RUNTIME) $(TEST_VISUAL)
 	$(TEST_TEARDOWN)
 	$(TEST_RUNTIME)
-	$(TEST_RELOAD)
 	$(TEST_VISUAL)
+
+test-full: $(PLUGIN).so test-logic $(TEST_RELOAD)
+	$(TEST_RELOAD)
+
+test: test-logic
 
 $(TEST_TEARDOWN): tests/test_teardown.cpp obj/teardown.o
 	$(CXX) -std=gnu++26 -O2 -g -o $@ tests/test_teardown.cpp obj/teardown.o

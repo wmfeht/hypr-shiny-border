@@ -47,12 +47,6 @@ instance() {
   echo $((count - 1))
 }
 
-hc() {
-  local i
-  i="$(instance)"
-  hyprctl -i "$i" "$@"
-}
-
 # Hyprland getPluginByPath only rejects the same path. We copy to a new
 # /tmp name every load, so a second load without unload would be a second
 # .so / RTTI domain. Refuse by plugin *name* regardless of path.
@@ -75,6 +69,9 @@ case "$cmd" in
       die "$PLUGIN_NAME already loaded (refusing a second copy; unload first)"
     fi
     dest="/tmp/hypr-shiny-border-$$.so"
+    # Sweep leftover copies after the refuse and name check, immediately
+    # before cp — a refused load must not delete a copy a retry still needs.
+    rm -f /tmp/hypr-shiny-border-*.so
     cp -f "$SO" "$dest"
     echo "$dest" > "$STATE"
     hyprctl -i "$target" plugin load "$dest"
@@ -83,8 +80,14 @@ case "$cmd" in
   unload)
     target="$(instance)"
     if [[ -f "$STATE" ]]; then
-      hyprctl -i "$target" plugin unload "$(cat "$STATE")" || true
-      rm -f "$STATE"
+      so_path="$(cat "$STATE")"
+      if hyprctl -i "$target" plugin unload "$so_path"; then
+        rm -f "$STATE"
+      elif list="$(hyprctl -i "$target" plugin list)" && ! grep -F -q -- "$PLUGIN_NAME" <<<"$list"; then
+        rm -f "$STATE"
+      else
+        die "unload failed; keeping $STATE for retry"
+      fi
     else
       echo "pluginctl: nothing recorded; trying the tree .so" >&2
       hyprctl -i "$target" plugin unload "$SO" || true

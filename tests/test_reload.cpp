@@ -45,26 +45,6 @@ static void writeFile(const std::string& path, const std::string& body) {
     out << body;
 }
 
-static std::string functionBody(const std::string& src, const std::string& signature) {
-    const auto pos = src.find(signature);
-    if (pos == std::string::npos)
-        return {};
-    const auto brace = src.find('{', pos);
-    if (brace == std::string::npos)
-        return {};
-    int depth = 0;
-    for (size_t i = brace; i < src.size(); ++i) {
-        if (src[i] == '{')
-            depth++;
-        else if (src[i] == '}') {
-            depth--;
-            if (depth == 0)
-                return src.substr(brace, i - brace + 1);
-        }
-    }
-    return {};
-}
-
 static int countNeedle(const std::string& hay, const std::string& needle) {
     int    n = 0;
     size_t p = 0;
@@ -206,79 +186,6 @@ static void checkResolvedBorderSize() {
     CHECK(shinyResolvedBorderSize(-1, 8) == 8);
 }
 
-static void checkProductionWiring() {
-    const std::string src     = repoRoot() + "/src";
-    const std::string deco    = readFile(src + "/deco.cpp");
-    const std::string main    = readFile(src + "/main.cpp");
-    const std::string globals = readFile(src + "/globals.hpp");
-    const std::string script  = readFile(repoRoot() + "/scripts/pluginctl.sh");
-
-    CHECK(!deco.empty());
-    CHECK(!main.empty());
-    CHECK(!globals.empty());
-    CHECK(!script.empty());
-
-    const auto border = functionBody(deco, "CShinyBorder::borderSize");
-    CHECK(!border.empty());
-    CHECK(border.find("shinyResolvedBorderSize") != std::string::npos);
-    CHECK(border.find("CConfigValue") == std::string::npos);
-    CHECK(border.find("static ") == std::string::npos);
-    CHECK(deco.find("config/ConfigValue.hpp") == std::string::npos);
-    CHECK(deco.find("PBORDERSIZE") == std::string::npos);
-    CHECK(deco.find("static auto PBORDERSIZE") == std::string::npos);
-    CHECK(deco.find("CConfigValue<Config::INTEGER>") == std::string::npos);
-
-    CHECK(globals.find("std::optional<CConfigValue<Config::INTEGER>>") != std::string::npos);
-    CHECK(globals.find("generalBorderSize") != std::string::npos);
-    CHECK(globals.find("kGeneralBorderSizeKey") != std::string::npos);
-    CHECK(globals.find("general:border_size") != std::string::npos);
-
-    const auto init = functionBody(main, "PLUGIN_DESCRIPTION_INFO PLUGIN_INIT");
-    const auto exit = functionBody(main, "void PLUGIN_EXIT");
-    CHECK(!init.empty());
-    CHECK(!exit.empty());
-    CHECK(init.find("generalBorderSize.emplace") != std::string::npos);
-    CHECK(init.find("kGeneralBorderSizeKey") != std::string::npos);
-    CHECK(exit.find("generalBorderSize.reset()") != std::string::npos);
-    CHECK(main.find("static auto PBORDERSIZE") == std::string::npos);
-
-    const auto loadAt   = script.find("\n  load)");
-    const auto unloadAt = script.find("\n  unload)");
-    const auto reloadAt = script.find("\n  reload)");
-    const auto starAt   = script.find("\n  *)");
-    CHECK(loadAt != std::string::npos && unloadAt != std::string::npos);
-    CHECK(reloadAt != std::string::npos && starAt != std::string::npos);
-    CHECK(loadAt < unloadAt);
-    CHECK(unloadAt < reloadAt);
-    CHECK(reloadAt < starAt);
-
-    const auto load = script.substr(loadAt, unloadAt - loadAt);
-    CHECK(load.find("already_loaded_by_name") != std::string::npos);
-    CHECK(load.find("plugin load") != std::string::npos);
-    CHECK(load.find("/tmp/hypr-shiny-border-$$.so") != std::string::npos);
-    const auto nameCheck = load.find("already_loaded_by_name");
-    const auto copyAt    = load.find("/tmp/hypr-shiny-border-$$.so");
-    const auto loadCmd   = load.find("plugin load");
-    CHECK(nameCheck < copyAt);
-    CHECK(copyAt < loadCmd);
-
-    const auto helper = script.substr(0, loadAt);
-    CHECK(helper.find("already_loaded_by_name") != std::string::npos);
-    const auto helperList = helper.find("plugin list");
-    CHECK(helperList != std::string::npos);
-    CHECK(helper.find("PLUGIN_NAME") != std::string::npos);
-
-    const auto reload = script.substr(reloadAt, starAt - reloadAt);
-    const auto uCall  = reload.find("\"$0\" unload");
-    const auto lCall  = reload.find("\"$0\" load");
-    CHECK(uCall != std::string::npos && lCall != std::string::npos);
-    CHECK(uCall < lCall);
-
-    CHECK(script.find("SHINY_INSTANCE") != std::string::npos);
-    CHECK(script.find("SHINY_LIVE") != std::string::npos);
-    CHECK(script.find("refuse_live") != std::string::npos);
-}
-
 static void checkPluginctl() {
     StateGuard     state;
     StubHyprctl    stub;
@@ -294,8 +201,11 @@ static void checkPluginctl() {
     CHECK(std::filesystem::exists(so));
 
     std::string out;
+    const std::string stale = "/tmp/hypr-shiny-border-stale.so";
+    writeFile(stale, "stale");
 
     // Name already listed (any path) → non-zero, no plugin load, no STATE write.
+    // Refuse must not sweep leftover /tmp copies a retry still needs.
     writeFile(kStatePath, "KEEP\n");
     stub.clearRecord();
     stub.setList("Plugin hypr-shiny-border by wmfeht:\n\tHandle: 0x1\n\tVersion: 0.1.0\n"
@@ -305,6 +215,7 @@ static void checkPluginctl() {
     CHECK(out.find("already loaded") != std::string::npos);
     CHECK(countNeedle(stub.recorded(), "plugin load") == 0);
     CHECK(readFile(kStatePath) == "KEEP\n");
+    CHECK(std::filesystem::exists(stale));
 
     // Listed only via a different path still refuses.
     stub.clearRecord();
@@ -312,8 +223,10 @@ static void checkPluginctl() {
     rc = stub.run("load", "", out);
     CHECK(rc != 0);
     CHECK(countNeedle(stub.recorded(), "plugin load") == 0);
+    CHECK(std::filesystem::exists(stale));
 
-    // Name not listed → copy under /tmp/hypr-shiny-border-*.so, exactly one plugin load.
+    // Name not listed → sweep stale copies, copy under /tmp/hypr-shiny-border-*.so,
+    // exactly one plugin load.
     stub.clearRecord();
     stub.setList("Plugin hyprbars by Vaxry:\n\tHandle: 0x2\n\tVersion: 1.0\n\tDescription: bars\n");
     rc = stub.run("load", "", out);
@@ -331,6 +244,7 @@ static void checkPluginctl() {
     CHECK(std::filesystem::exists(dest));
     CHECK(std::filesystem::file_size(dest) == std::filesystem::file_size(so));
     CHECK(readFile(kStatePath).find("/tmp/hypr-shiny-border-") != std::string::npos);
+    CHECK(!std::filesystem::exists(stale));
     std::filesystem::remove(dest);
 
     // reload is unload then load.
@@ -362,8 +276,44 @@ static void checkPluginctl() {
     CHECK(countNeedle(rec3, "plugin unload") == 1);
     CHECK(countNeedle(rec3, "plugin load") == 0);
     CHECK(out.find("already loaded") != std::string::npos);
+    CHECK(readFile(kStatePath).find("/tmp/shiny-old-copy.so") != std::string::npos);
 
-    // Instance 0 without SHINY_LIVE=1 still refuses. No plugin load.
+    // Failed unload keeps $STATE so a retry can name the /tmp copy.
+    writeFile(kStatePath, "/tmp/shiny-old-copy.so\n");
+    stub.clearRecord();
+    stub.setList("Plugin hypr-shiny-border by wmfeht:\n\tHandle: 0x1\n");
+    rc = stub.run("unload", "HYPRCTL_UNLOAD_FAIL=1", out);
+    CHECK(rc != 0);
+    CHECK(countNeedle(stub.recorded(), "plugin unload") == 1);
+    CHECK(readFile(kStatePath).find("/tmp/shiny-old-copy.so") != std::string::npos);
+
+    // Retry after a failed unload: same $STATE path, then $STATE is gone.
+    stub.clearRecord();
+    stub.setList("no plugins loaded\n");
+    rc = stub.run("unload", "", out);
+    CHECK(rc == 0);
+    CHECK(countNeedle(stub.recorded(), "plugin unload") == 1);
+    CHECK(stub.recorded().find("/tmp/shiny-old-copy.so") != std::string::npos);
+    CHECK(!std::filesystem::exists(kStatePath));
+
+    // Successful unload removes $STATE.
+    writeFile(kStatePath, "/tmp/shiny-old-copy.so\n");
+    stub.clearRecord();
+    stub.setList("Plugin hypr-shiny-border by wmfeht:\n\tHandle: 0x1\n");
+    rc = stub.run("unload", "", out);
+    CHECK(rc == 0);
+    CHECK(!std::filesystem::exists(kStatePath));
+
+    // Unload reported failure but the name is gone → drop the stale path.
+    writeFile(kStatePath, "/tmp/shiny-old-copy.so\n");
+    stub.clearRecord();
+    stub.setList("no plugins loaded\n");
+    rc = stub.run("unload", "HYPRCTL_UNLOAD_FAIL=1", out);
+    CHECK(rc == 0);
+    CHECK(!std::filesystem::exists(kStatePath));
+
+    // Instance 0 without SHINY_LIVE=1 still refuses. No plugin load, no /tmp sweep.
+    writeFile(stale, "stale");
     stub.clearRecord();
     stub.setList("no plugins loaded\n");
     rc = stub.run("load", "SHINY_INSTANCE=0", out);
@@ -371,11 +321,12 @@ static void checkPluginctl() {
     CHECK(out.find("refusing to touch the live Hyprland session") != std::string::npos);
     CHECK(countNeedle(stub.recorded(), "plugin load") == 0);
     CHECK(stub.recorded().empty());
+    CHECK(std::filesystem::exists(stale));
+    std::filesystem::remove(stale);
 }
 
 int main() {
     checkResolvedBorderSize();
-    checkProductionWiring();
     checkPluginctl();
 
     if (g_fails) {

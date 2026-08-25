@@ -8,8 +8,12 @@ description = "Compile hypr-shiny-border.so against system Hyprland headers"
 run = "make -j$(nproc)"
 
 [tasks.test]
-description = "Run in-repo compositor-free unit tests (teardown + runtime CTD + reload footguns)"
+description = "Compositor-free logic tests (no Hyprland headers, no .so)"
 run = "make test"
+
+[tasks.test-full]
+description = "Logic tests plus pluginctl reload harness (needs hypr-shiny-border.so / headers)"
+run = "make test-full"
 
 [tasks.clean]
 description = "Remove objects and the .so"
