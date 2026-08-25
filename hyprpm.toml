@@ -1,0 +1,11 @@
+[repository]
+name = "hypr-shiny-border"
+authors = ["wmfeht"]
+# Pin Hyprland commit → this repo commit once you have releases.
+# commit_pins = [["efb50993780079460b0cbed1363e2166a2de1d9f", "YOUR_PLUGIN_COMMIT"]]
+
+[hypr-shiny-border]
+description = "Window border gradient that faces the cursor"
+authors = ["wmfeht"]
+output = "hypr-shiny-border.so"
+build = ["make -j$(nproc)"]

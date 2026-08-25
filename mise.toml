@@ -1,0 +1,48 @@
+# Hyprland plugins must be built with the *same* GCC that built the compositor.
+# Do not mise-install a different g++. This box: GCC 16.2.1 / Hyprland v0.56.2.
+
+min_version = "2025.8.0"
+
+[tasks.build]
+description = "Compile hypr-shiny-border.so against system Hyprland headers"
+run = "make -j$(nproc)"
+
+[tasks.clean]
+description = "Remove objects and the .so"
+run = "make clean"
+
+[tasks.clangd]
+description = "Write compile_flags.txt for clangd"
+run = "make clangd"
+
+[tasks.headers]
+description = "Compare running compositor hash vs plugin headers"
+run = """
+echo '=== hyprctl version ==='
+hyprctl version
+echo
+echo '=== headers ==='
+grep -E 'GIT_COMMIT_HASH|GIT_TAG|GIT_BRANCH' /usr/include/hyprland/src/version.h
+"""
+
+[tasks.instances]
+description = "List Hyprland instances (outer session vs nest)"
+run = "hyprctl instances"
+
+[tasks.load]
+description = "Load the .so into the nest (last instance). Refuses the live session unless SHINY_LIVE=1"
+run = "scripts/pluginctl.sh load"
+depends = ["build"]
+
+[tasks.unload]
+description = "Unload from $SHINY_INSTANCE"
+run = "scripts/pluginctl.sh unload"
+
+[tasks.reload]
+description = "Rebuild, copy to a fresh path, unload+load (dodges dlopen cache)"
+run = "scripts/pluginctl.sh reload"
+depends = ["build"]
+
+[tasks.nest]
+description = "Nested Hyprland with nest/hyprland.lua — crash sandbox"
+run = "Hyprland --config \"$MISE_PROJECT_ROOT/nest/hyprland.lua\""

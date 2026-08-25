@@ -1,0 +1,27 @@
+# Build
+*.so
+*.o
+*.a
+/obj/
+/compile_flags.txt
+/compile_commands.json
+
+# clangd / ccache
+.cache/
+.clangd/
+.cccaches/
+
+# Editors
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# mise local overrides
+mise.local.toml
+.mise.local.toml
