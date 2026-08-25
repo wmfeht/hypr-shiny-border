@@ -14,7 +14,13 @@ LIBS     := $(shell pkg-config --libs $(PKG))
 SRC := $(wildcard src/*.cpp)
 OBJ := $(patsubst src/%.cpp,obj/%.o,$(SRC))
 
-.PHONY: all clean clangd
+TEST_TEARDOWN := tests/test_teardown
+TEST_RUNTIME  := tests/test_runtime
+TEST_RELOAD   := tests/test_reload
+TEST_VISUAL   := tests/test_visual
+TESTS         := $(TEST_TEARDOWN) $(TEST_RUNTIME) $(TEST_RELOAD) $(TEST_VISUAL)
+
+.PHONY: all clean clangd test
 
 all: $(PLUGIN).so
 
@@ -25,8 +31,26 @@ obj/%.o: src/%.cpp src/*.hpp
 $(PLUGIN).so: $(OBJ)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
 
+test: $(PLUGIN).so $(TESTS)
+	$(TEST_TEARDOWN)
+	$(TEST_RUNTIME)
+	$(TEST_RELOAD)
+	$(TEST_VISUAL)
+
+$(TEST_TEARDOWN): tests/test_teardown.cpp obj/teardown.o
+	$(CXX) -std=gnu++26 -O2 -g -o $@ tests/test_teardown.cpp obj/teardown.o
+
+$(TEST_RUNTIME): tests/test_runtime.cpp obj/runtime.o
+	$(CXX) -std=gnu++26 -O2 -g -o $@ tests/test_runtime.cpp obj/runtime.o
+
+$(TEST_RELOAD): tests/test_reload.cpp obj/runtime.o
+	$(CXX) -std=gnu++26 -O2 -g -o $@ tests/test_reload.cpp obj/runtime.o
+
+$(TEST_VISUAL): tests/test_visual.cpp obj/runtime.o
+	$(CXX) -std=gnu++26 -O2 -g -o $@ tests/test_visual.cpp obj/runtime.o
+
 clean:
-	rm -rf obj $(PLUGIN).so compile_flags.txt
+	rm -rf obj $(PLUGIN).so compile_flags.txt $(TESTS)
 
 clangd:
 	@printf '%s\n' $(CXXFLAGS) | tr ' ' '\n' | grep -v '^$$' > compile_flags.txt

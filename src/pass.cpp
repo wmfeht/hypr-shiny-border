@@ -1,4 +1,6 @@
 #include "pass.hpp"
+#include "teardown.hpp"
+#include "runtime.hpp"
 #include "shaders.hpp"
 #include "globals.hpp"
 
@@ -7,6 +9,7 @@
 #include <hyprland/src/render/Shader.hpp>
 #include <hyprland/src/output/Monitor.hpp>
 #include <hyprland/src/debug/log/Logger.hpp>
+#include <hyprland/src/helpers/Color.hpp>
 
 #include <GLES3/gl32.h>
 
@@ -14,10 +17,19 @@ using namespace Render::GL;
 
 static SP<CShader> g_shinyShader;
 
-bool ensureShinyShader() {
-    if (g_shinyShader && g_shinyShader->program())
-        return true;
+static bool hyprGlAlive() {
+    return static_cast<bool>(g_pHyprOpenGL);
+}
 
+static void hyprMakeCurrent() {
+    g_pHyprOpenGL->makeEGLCurrent();
+}
+
+static bool hyprShaderLive() {
+    return g_shinyShader && g_shinyShader->program();
+}
+
+static bool hyprCompileShader() {
     if (!g_pHyprOpenGL)
         return false;
 
@@ -32,10 +44,18 @@ bool ensureShinyShader() {
     return true;
 }
 
-void destroyShinyShader() {
-    if (g_pHyprOpenGL)
-        g_pHyprOpenGL->makeEGLCurrent();
+static void hyprResetShader() {
     g_shinyShader.reset();
+}
+
+[[gnu::constructor]] static void bindShinyShaderOps() {
+    shinySetShaderOps({
+        .glAlive     = hyprGlAlive,
+        .makeCurrent = hyprMakeCurrent,
+        .shaderLive  = hyprShaderLive,
+        .compile     = hyprCompileShader,
+        .reset       = hyprResetShader,
+    });
 }
 
 CShinyPassElement::CShinyPassElement(const SData& data) : m_data(data) {}
@@ -87,23 +107,28 @@ std::vector<UP<IPassElement>> CShinyPassElement::draw() {
     if (!shader)
         return {};
 
+    const CHyprColor colA{m_data.shared.colA};
+    const CHyprColor colB{m_data.shared.colB};
+
     shader->setUniformMatrix3fv(SHADER_PROJ, 1, GL_TRUE, proj.getMatrix());
-    shader->setUniformFloat4(SHADER_COLOR, sc<float>(m_data.colA.r), sc<float>(m_data.colA.g), sc<float>(m_data.colA.b), sc<float>(m_data.colA.a));
-    shader->setUniformFloat4(SHADER_COLOR_SRGB, sc<float>(m_data.colB.r), sc<float>(m_data.colB.g), sc<float>(m_data.colB.b), sc<float>(m_data.colB.a));
+    shader->setUniformFloat4(SHADER_COLOR, sc<float>(colA.r), sc<float>(colA.g), sc<float>(colA.b), sc<float>(colA.a));
+    shader->setUniformFloat4(SHADER_COLOR_SRGB, sc<float>(colB.r), sc<float>(colB.g), sc<float>(colB.b), sc<float>(colB.a));
     shader->setUniformFloat2(SHADER_TOP_LEFT, sc<float>(transformed.x), sc<float>(transformed.y));
     shader->setUniformFloat2(SHADER_FULL_SIZE, sc<float>(transformed.width), sc<float>(transformed.height));
-    shader->setUniformFloat(SHADER_RADIUS, sc<float>(m_data.round));
-    shader->setUniformFloat(SHADER_RADIUS_OUTER, sc<float>(m_data.outerRound));
-    shader->setUniformFloat(SHADER_ROUNDING_POWER, m_data.roundingPower);
-    shader->setUniformFloat(SHADER_THICK, sc<float>(m_data.borderSize) * sc<float>(mon->m_scale));
-    shader->setUniformFloat(SHADER_ANGLE, m_data.angle);
+    shader->setUniformFloat(SHADER_RADIUS, sc<float>(m_data.shared.rounding));
+    shader->setUniformFloat(SHADER_RADIUS_OUTER, sc<float>(m_data.shared.outerRound));
+    shader->setUniformFloat(SHADER_ROUNDING_POWER, m_data.shared.roundingPower);
+    shader->setUniformFloat(SHADER_THICK, shinyShaderThick(sc<float>(m_data.shared.borderSize), sc<float>(mon->m_scale)));
     shader->setUniformFloat(SHADER_TIME, m_data.time);
-    shader->setUniformFloat(SHADER_ALPHA, m_data.a);
+    shader->setUniformFloat(SHADER_ALPHA, m_data.shared.a);
     shader->setUniformFloat(SHADER_RANGE, m_data.lobe);
     shader->setUniformFloat(SHADER_BRIGHTNESS, m_data.pulseHz);
     shader->setUniformFloat2(SHADER_POINTER, sc<float>(ptrBox.x), sc<float>(ptrBox.y));
 
-    glBindVertexArray(shader->getUniformLocation(SHADER_SHADER_VAO));
+    const GLint vao = shader->getUniformLocation(SHADER_SHADER_VAO);
+    if (!shinyCanBindVao(vao))
+        return {};
+    glBindVertexArray(vao);
 
     const CRegion* dmg = &rd.damage;
     if (rd.clipBox.width != 0 && rd.clipBox.height != 0) {

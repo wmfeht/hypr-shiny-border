@@ -149,8 +149,11 @@ gdb: `gdb --args Hyprland --config $PWD/nest/hyprland.lua`, then `bt` when it ex
 src/main.cpp     PLUGIN_INIT / EXIT, listeners, atan2
 src/deco.*       IHyprWindowDecoration
 src/pass.*       CShinyPassElement, shader compile
+src/teardown.*   teardown mark + shader lifecycle (PLUGIN_EXIT)
+src/runtime.*    mapped-window / VAO guards (damageEntire, shader draw)
 src/shaders.hpp  vertex + conic comet fragment
 src/globals.hpp  HANDLE, config SPs, signal listeners (must stay alive)
+tests/           unit tests (no compositor)
 nest/hyprland.lua
 scripts/pluginctl.sh
 hyprpm.toml      packaging later; not the inner loop
@@ -166,7 +169,7 @@ mise.toml        tasks
 - **Hash check** in `PLUGIN_INIT`. If you skip it you get a "fun" SIGSEGV after the next `omarchy update`.
 - **Lua key is `shiny_border`.** Hyphens become underscores. `["shiny-border"]` is unknown.
 - **Do not** `removeAllOfType("CBorderPassElement")` on exit. That pass is also the stock border.
-- **Do** `removeAllOfType("CShinyPassElement")` and reset `Event::bus()` listeners in `PLUGIN_EXIT`. Hyprland strips decorations; it does **not** flush plugin pass elements. `beginRender` → `CRenderPass::clear()` then calls our destructor after `dlclose`. That is a session-killing SIGSEGV.
+- **Do** `m_renderPass.clear()` on the leftover already-rendered pass, and reset `Event::bus()` listeners, in `PLUGIN_EXIT`. Surgical `removeAllOfType("CShinyPassElement")` does not recurse into nested transformer passes. Hyprland strips decorations; it does **not** flush plugin pass elements. `beginRender` → `CRenderPass::clear()` then calls our destructor after `dlclose`. That is a session-killing SIGSEGV.
 - Function hooks are x86_64-only and a last resort. We use `Event::bus()`.
 - Hyprland headers are C++26-shaped. The Makefile asks for `gnu++26`.
 - Omarchy `~/.config/omarchy/plugins/` is Quickshell. Putting this there does nothing.

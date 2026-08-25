@@ -52,7 +52,7 @@ hl.config({
 if shinyLoaded() then
   hl.config({
     plugin = {
-      ["shiny-border"] = {
+      shiny_border = {
         enabled = true,
         active_only = true,
         pulse = true,

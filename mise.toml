@@ -7,6 +7,10 @@ min_version = "2025.8.0"
 description = "Compile hypr-shiny-border.so against system Hyprland headers"
 run = "make -j$(nproc)"
 
+[tasks.test]
+description = "Run in-repo compositor-free unit tests (teardown + runtime CTD + reload footguns)"
+run = "make test"
+
 [tasks.clean]
 description = "Remove objects and the .so"
 run = "make clean"

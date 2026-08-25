@@ -1,8 +1,8 @@
 #include "globals.hpp"
 #include "deco.hpp"
 #include "pass.hpp"
+#include "runtime.hpp"
 
-#include <cmath>
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/state/FocusState.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
@@ -15,36 +15,18 @@
 using namespace Hyprutils::Memory;
 using namespace Desktop::View;
 
-static constexpr const char* DECO_NAME = "Shiny Border";
-
-static bool windowHasShiny(PHLWINDOW window) {
-    for (auto& d : window->m_windowDecorations) {
-        if (d && d->getDisplayName() == DECO_NAME)
-            return true;
-    }
-    return false;
-}
-
 static CShinyBorder* shinyOn(PHLWINDOW window) {
     for (auto& d : window->m_windowDecorations) {
-        if (d && d->getDisplayName() == DECO_NAME)
-            return dynamic_cast<CShinyBorder*>(d.get());
+        if (auto* shiny = dynamic_cast<CShinyBorder*>(d.get()))
+            return shiny;
     }
     return nullptr;
 }
 
 static void attach(PHLWINDOW window) {
-    if (!validMapped(window) || windowHasShiny(window))
+    if (!validMapped(window) || shinyOn(window))
         return;
     HyprlandAPI::addWindowDecoration(PHANDLE, window, makeUnique<CShinyBorder>(window));
-}
-
-static float quantize(float radians) {
-    const int degStep = std::max(1, sc<int>(g_cfg.quantizeDeg->value()));
-    const int offset  = sc<int>(g_cfg.angleOffset->value());
-    float     deg     = std::fmod(std::fmod(radians * 180.f / M_PI, 360.f) + 360.f, 360.f);
-    deg               = std::floor((deg + offset) / degStep) * degStep;
-    return deg * sc<float>(M_PI) / 180.f;
 }
 
 static void onMouseMove() {
@@ -64,10 +46,19 @@ static void onMouseMove() {
         if (!deco)
             continue;
 
-        const auto center = w->middle();
-        const float next  = quantize(std::atan2(cursor.y - center.y, cursor.x - center.x));
+        const auto mon = w->m_monitor.lock();
+        if (!mon)
+            continue;
 
-        if (std::fabs(next - deco->angle()) < 1e-4f)
+        // Same space as SData.pointer (monitor-local, scaled) vs window center.
+        const auto  pointer = (cursor + w->m_floatingOffset - mon->m_position) * mon->m_scale;
+        const auto  center  = (w->middle() + w->m_floatingOffset - mon->m_position) * mon->m_scale;
+        const float heading = shinyGpuHeading(sc<float>(pointer.x), sc<float>(pointer.y), sc<float>(center.x),
+                                              sc<float>(center.y));
+        const float next    = shinyQuantizeHeading(heading, sc<int>(g_cfg.angleOffset->value()),
+                                                   sc<int>(g_cfg.quantizeDeg->value()));
+
+        if (!shinyShouldDamageHeading(deco->angle(), next))
             continue;
 
         deco->setAngle(next);
@@ -122,26 +113,18 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     HyprlandAPI::reloadConfig();
 
+    // One handle, plugin-owned. ~CConfigValue erases from the compositor
+    // registry; PLUGIN_EXIT resets this before dlclose.
+    g_cfg.generalBorderSize.emplace(kGeneralBorderSizeKey);
+
     g_onWindowOpen = Event::bus()->m_events.window.open.listen([](PHLWINDOW w) { attach(w); });
     g_onMouseMove  = Event::bus()->m_events.input.mouse.move.listen([] { onMouseMove(); });
     g_onFocus      = Event::bus()->m_events.window.active.listen([](PHLWINDOW, Desktop::eFocusReason) {
         for (auto& w : Desktop::windowState()->windows()) {
-            if (auto* d = shinyOn(w))
+            if (auto* d = shinyOn(w)) {
+                d->syncPulse();
                 d->damageEntire();
-        }
-    });
-    g_onTick       = Event::bus()->m_events.render.pre.listen([](PHLMONITOR mon) {
-        if (!g_cfg.enabled->value() || !g_cfg.pulse->value())
-            return;
-        for (auto& w : Desktop::windowState()->windows()) {
-            if (!validMapped(w) || w->isHidden())
-                continue;
-            if (w->m_monitor.lock() != mon)
-                continue;
-            if (g_cfg.activeOnly->value() && w != Desktop::focusState()->window())
-                continue;
-            if (auto* d = shinyOn(w))
-                d->damageEntire();
+            }
         }
     });
 
@@ -161,14 +144,20 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_onWindowOpen.reset();
     g_onMouseMove.reset();
     g_onFocus.reset();
-    g_onTick.reset();
 
-    // Pass elements live until the *next* beginRender()::clear(). Unload in
-    // between and CRenderPass::clear() calls our vtable after munmap — SIGSEGV
-    // in the live compositor. hyprtrails does the same removeAllOfType.
+    // Leftover draw() must not compile a new program into a dying .so.
+    markShinyTeardown();
+
+    // Leftover pass is already-rendered dead data. clear() destroys nested
+    // CTransformedWindowPassElement → nested CShinyPassElement before dlclose.
+    // removeAllOfType("CShinyPassElement") does not recurse.
     // Do not remove CBorderPassElement: that is the stock border too.
     if (g_pHyprRenderer)
-        g_pHyprRenderer->m_renderPass.removeAllOfType("CShinyPassElement");
+        g_pHyprRenderer->m_renderPass.clear();
 
     destroyShinyShader();
+
+    // Destroy before dlclose so a later config reload cannot flushCaches()
+    // through a pointer into unmapped plugin text.
+    g_cfg.generalBorderSize.reset();
 }

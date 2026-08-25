@@ -39,12 +39,11 @@ uniform float radius;
 uniform float radiusOuter;
 uniform float roundingPower;
 uniform float thick;
-uniform float angle;             // radians, 0 = +x, compositor Y-down baked in
 uniform float time;
 uniform float alpha;
 uniform float range;             // angular half-width as fraction of the circle (0.08–0.45)
 uniform float brightness;        // pulse Hz
-uniform vec2  pointer_position;  // gl_FragCoord space; used if length > 0
+uniform vec2  pointer_position;  // gl_FragCoord space; heading vs box center
 
 const float TAU = 6.28318530718;
 const float AA  = 1.25;
@@ -64,12 +63,10 @@ void main() {
     vec2 center = topLeft + fullSize * 0.5;
     vec2 p      = gl_FragCoord.xy - center;
 
-    // CPU angle is Y-down atan2. gl_FragCoord is Y-up — flip so the head faces the mouse.
-    float heading = angle;
-    if (dot(pointer_position, pointer_position) > 0.5) {
-        vec2 dir = pointer_position - center;
-        heading  = atan(-dir.y, dir.x);
-    }
+    // GPU pointer is the source of truth. Always face pointer vs box center,
+    // including when pointer_position is at the transformed origin.
+    vec2  dir     = pointer_position - center;
+    float heading = atan(-dir.y, dir.x);
 
     float ang = atan(-p.y, p.x);
     float t   = fract((ang - heading) / TAU); // 0 at the mouse-facing head

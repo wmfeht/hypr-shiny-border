@@ -53,12 +53,27 @@ hc() {
   hyprctl -i "$i" "$@"
 }
 
+# Hyprland getPluginByPath only rejects the same path. We copy to a new
+# /tmp name every load, so a second load without unload would be a second
+# .so / RTTI domain. Refuse by plugin *name* regardless of path.
+PLUGIN_NAME="hypr-shiny-border"
+
+already_loaded_by_name() {
+  local target="$1"
+  local list
+  list="$(hyprctl -i "$target" plugin list)" || die "could not list plugins on instance $target"
+  grep -F -q -- "$PLUGIN_NAME" <<<"$list"
+}
+
 cmd="${1:-}"
 case "$cmd" in
   load)
     [[ -f "$SO" ]] || die "no $SO — run: mise run build"
     # Resolve the target *before* copying, so a refuse doesn't leave a stray .so.
     target="$(instance)"
+    if already_loaded_by_name "$target"; then
+      die "$PLUGIN_NAME already loaded (refusing a second copy; unload first)"
+    fi
     dest="/tmp/hypr-shiny-border-$$.so"
     cp -f "$SO" "$dest"
     echo "$dest" > "$STATE"
@@ -76,6 +91,8 @@ case "$cmd" in
     fi
     ;;
   reload)
+    # Unload then load. If unload fails and the name is still listed, load
+    # refuses rather than stacking a second copy.
     "$0" unload || true
     "$0" load
     ;;

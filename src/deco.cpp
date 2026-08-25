@@ -1,8 +1,8 @@
 #include "deco.hpp"
 #include "globals.hpp"
+#include "runtime.hpp"
 
 #include <algorithm>
-#include <cmath>
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
@@ -12,8 +12,9 @@
 #include <hyprland/src/render/Renderer.hpp>
 #include <hyprland/src/render/decorations/DecorationPositioner.hpp>
 #include <hyprland/src/render/pass/BorderPassElement.hpp>
-#include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/helpers/memory/Memory.hpp>
+#include <hyprland/src/managers/eventLoop/EventLoopManager.hpp>
+#include <hyprland/src/managers/fullscreen/FullscreenController.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include "pass.hpp"
 
@@ -23,15 +24,83 @@ using namespace Desktop::View;
 CShinyBorder::CShinyBorder(PHLWINDOW window) : IHyprWindowDecoration(window), m_window(window) {
     m_lastPos  = window->position(IGeometric::GEOMETRIC_CURRENT);
     m_lastSize = window->size(IGeometric::GEOMETRIC_CURRENT);
+    syncPulse();
+}
+
+CShinyBorder::~CShinyBorder() {
+    if (!m_pulseTimer)
+        return;
+    m_pulseTimer->cancel();
+    if (g_pEventLoopManager)
+        g_pEventLoopManager->removeTimer(m_pulseTimer);
+    m_pulseTimer.reset();
+}
+
+bool CShinyBorder::pulseWanted() const {
+    const auto PWINDOW = m_window.lock();
+    const bool focused = PWINDOW && PWINDOW == Desktop::focusState()->window();
+    return shinyPulseShouldRun(g_cfg.enabled->value(), g_cfg.pulse->value(), g_cfg.activeOnly->value(), focused);
+}
+
+void CShinyBorder::startPulse() {
+    if (!g_pEventLoopManager)
+        return;
+
+    const auto period = std::chrono::milliseconds(shinyPulseTickMs(sc<float>(g_cfg.pulseHz->value())));
+
+    if (!m_pulseTimer) {
+        m_pulseTimer = makeShared<CEventLoopTimer>(
+            period, [this](SP<CEventLoopTimer> self, void*) { onPulseTick(self); }, nullptr);
+        g_pEventLoopManager->addTimer(m_pulseTimer);
+        damageEntire();
+        return;
+    }
+
+    if (!m_pulseTimer->armed()) {
+        m_pulseTimer->updateTimeout(period);
+        damageEntire();
+    }
+}
+
+void CShinyBorder::stopPulse() {
+    if (!m_pulseTimer)
+        return;
+    // Disarm only — cancel() is sticky and would prevent a later re-arm.
+    m_pulseTimer->updateTimeout(std::nullopt);
+}
+
+void CShinyBorder::onPulseTick(SP<CEventLoopTimer> self) {
+    if (!validMapped(m_window)) {
+        stopPulse();
+        return;
+    }
+    if (!pulseWanted()) {
+        stopPulse();
+        damageEntire();
+        return;
+    }
+    damageEntire();
+    if (self)
+        self->updateTimeout(std::chrono::milliseconds(shinyPulseTickMs(sc<float>(g_cfg.pulseHz->value()))));
+}
+
+void CShinyBorder::syncPulse() {
+    if (pulseWanted()) {
+        startPulse();
+        return;
+    }
+    const bool wasArmed = m_pulseTimer && m_pulseTimer->armed();
+    stopPulse();
+    if (wasArmed)
+        damageEntire();
 }
 
 int CShinyBorder::borderSize() const {
     const int configured = sc<int>(g_cfg.borderSize->value());
-    if (configured >= 0)
-        return configured;
-
-    static auto PBORDERSIZE = CConfigValue<Config::INTEGER>("general:border_size");
-    return sc<int>(*PBORDERSIZE);
+    int       general    = 0;
+    if (g_cfg.generalBorderSize && g_cfg.generalBorderSize->good())
+        general = sc<int>(*g_cfg.generalBorderSize.value());
+    return shinyResolvedBorderSize(configured, general);
 }
 
 SDecorationPositioningInfo CShinyBorder::getPositioningInfo() {
@@ -52,12 +121,18 @@ void CShinyBorder::onPositioningReply(const SDecorationPositioningReply& reply) 
 }
 
 CBox CShinyBorder::assignedBoxGlobal() {
+    if (!shinyCanUseMappedGeometry(validMapped(m_window), static_cast<bool>(g_pHyprRenderer)))
+        return {};
+
+    const auto PWINDOW = m_window.lock();
+    if (!PWINDOW)
+        return {};
+
     CBox box = m_assignedGeometry;
     box.translate(g_pDecorationPositioner->getEdgeDefinedPoint(
         DECORATION_EDGE_BOTTOM | DECORATION_EDGE_LEFT | DECORATION_EDGE_RIGHT | DECORATION_EDGE_TOP, m_window));
 
-    const auto PWINDOW = m_window.lock();
-    if (!PWINDOW || !PWINDOW->m_workspace)
+    if (!PWINDOW->m_workspace)
         return box;
 
     if (!PWINDOW->m_pinned)
@@ -67,7 +142,14 @@ CBox CShinyBorder::assignedBoxGlobal() {
 }
 
 void CShinyBorder::draw(PHLMONITOR pMonitor, float const& a) {
-    if (!validMapped(m_window) || !g_cfg.enabled->value())
+    if (!validMapped(m_window)) {
+        stopPulse();
+        return;
+    }
+
+    syncPulse();
+
+    if (!g_cfg.enabled->value())
         return;
 
     const auto PWINDOW = m_window.lock();
@@ -92,43 +174,44 @@ void CShinyBorder::draw(PHLMONITOR pMonitor, float const& a) {
     if (outerBox.width < 1 || outerBox.height < 1)
         return;
 
-    const auto ROUNDING      = PWINDOW->rounding() * pMonitor->m_scale;
-    const auto ROUNDINGPOWER = PWINDOW->roundingPower();
-    const auto OUTERROUND    = (PWINDOW->rounding() + BORDERSIZE) * pMonitor->m_scale;
-    const auto BS_PX         = sc<int>(std::round(BORDERSIZE * pMonitor->m_scale));
+    const ShinyDrawShared shared{
+        .rounding      = sc<int>(PWINDOW->rounding() * pMonitor->m_scale),
+        .outerRound    = sc<int>((PWINDOW->rounding() + BORDERSIZE) * pMonitor->m_scale),
+        .roundingPower = PWINDOW->roundingPower(),
+        .a             = a,
+        .borderSize    = BORDERSIZE,
+        .colA          = sc<uint64_t>(g_cfg.colA->value()),
+        .colB          = sc<uint64_t>(g_cfg.colB->value()),
+    };
+    const auto mapped = shinyMapDrawBackends(shared, pMonitor->m_scale);
 
     if (ensureShinyShader()) {
         const auto cursor = g_pInputManager->getMouseCoordsInternal();
         CShinyPassElement::SData data;
-        data.box           = outerBox;
-        data.colA          = CHyprColor{sc<uint64_t>(g_cfg.colA->value())};
-        data.colB          = CHyprColor{sc<uint64_t>(g_cfg.colB->value())};
-        data.pointer       = (cursor + PWINDOW->m_floatingOffset - pMonitor->m_position) * pMonitor->m_scale;
-        data.angle         = m_angle;
-        data.a             = a;
-        data.roundingPower = ROUNDINGPOWER;
-        data.time          = g_cfg.pulse->value() ? g_pHyprRenderer->m_globalTimer.getSeconds() : 0.f;
-        data.pulseHz       = g_cfg.pulse->value() ? sc<float>(g_cfg.pulseHz->value()) : 0.f;
-        data.lobe          = sc<float>(g_cfg.lobe->value());
-        data.round         = sc<int>(ROUNDING);
-        data.outerRound    = sc<int>(OUTERROUND);
-        data.borderSize    = BS_PX;
+        data.shared  = mapped.shader;
+        data.box     = outerBox;
+        data.pointer = (cursor + PWINDOW->m_floatingOffset - pMonitor->m_position) * pMonitor->m_scale;
+        const auto pulseU = shinyPulseUniforms(g_cfg.pulse->value(), g_pHyprRenderer->m_globalTimer.getSeconds(),
+                                               sc<float>(g_cfg.pulseHz->value()));
+        data.time         = pulseU.time;
+        data.pulseHz      = pulseU.pulseHz;
+        data.lobe    = sc<float>(g_cfg.lobe->value());
         g_pHyprRenderer->addPassElement(makeUnique<CShinyPassElement>(data));
         return;
     }
 
-    CBox windowBox = outerBox.copy().expand(-BS_PX).round();
+    CBox windowBox = outerBox.copy().expand(-mapped.fallback.expandPx).round();
     Config::CGradientValueData grad(
-        {CHyprColor{sc<uint64_t>(g_cfg.colA->value())}, CHyprColor{sc<uint64_t>(g_cfg.colB->value())}}, m_angle);
+        {CHyprColor{mapped.fallback.shared.colA}, CHyprColor{mapped.fallback.shared.colB}}, m_angle);
 
     CBorderPassElement::SBorderData data;
     data.box           = windowBox;
     data.grad1         = grad;
-    data.round         = sc<int>(ROUNDING);
-    data.outerRound    = sc<int>(OUTERROUND);
-    data.roundingPower = ROUNDINGPOWER;
-    data.a             = a;
-    data.borderSize    = BORDERSIZE;
+    data.round         = mapped.fallback.shared.rounding;
+    data.outerRound    = mapped.fallback.shared.outerRound;
+    data.roundingPower = mapped.fallback.shared.roundingPower;
+    data.a             = mapped.fallback.shared.a;
+    data.borderSize    = mapped.fallback.shared.borderSize;
     data.window        = m_window;
 
     g_pHyprRenderer->addPassElement(makeUnique<CBorderPassElement>(data));
@@ -139,19 +222,47 @@ eDecorationType CShinyBorder::getDecorationType() {
 }
 
 void CShinyBorder::updateWindow(PHLWINDOW pWindow) {
-    m_lastPos  = pWindow->position(IGeometric::GEOMETRIC_CURRENT);
-    m_lastSize = pWindow->size(IGeometric::GEOMETRIC_CURRENT);
+    const auto pos  = pWindow->position(IGeometric::GEOMETRIC_CURRENT);
+    const auto size = pWindow->size(IGeometric::GEOMETRIC_CURRENT);
+    const int  bs   = borderSize();
 
-    const int bs = borderSize();
-    if (bs != m_lastSizeB) {
+    const auto actions = shinyUpdateWindowActions(
+        ShinyGeoLatch{pos.x, pos.y, size.x, size.y}, bs,
+        ShinyGeoLatch{m_lastPos.x, m_lastPos.y, m_lastSize.x, m_lastSize.y}, m_lastSizeB);
+
+    if (actions.reposition) {
         m_lastSizeB = bs;
         g_pDecorationPositioner->repositionDeco(this);
     }
 
-    damageEntire();
+    m_lastPos  = pos;
+    m_lastSize = size;
+
+    if (actions.damage)
+        damageEntire();
+
+    syncPulse();
 }
 
 void CShinyBorder::damageEntire() {
+    const bool mapped   = validMapped(m_window);
+    const bool renderer = static_cast<bool>(g_pHyprRenderer);
+    // mapped + renderer first — fullscreen lookup is not safe on an unmapped
+    // / closing window, and renderer damage is not safe with a null renderer.
+    if (!shinyCanUseMappedGeometry(mapped, renderer))
+        return;
+
+    const auto PWINDOW = m_window.lock();
+    if (!PWINDOW)
+        return;
+
+    // skip exclusive fullscreen — renderWindow already sets decorate = false
+    // for that mode
+    const bool exclusiveFs =
+        Fullscreen::controller()->getFullscreenModes(PWINDOW).internal == Fullscreen::FSMODE_FULLSCREEN;
+    if (!shinyCanDamage(mapped, renderer, exclusiveFs))
+        return;
+
     CBox dm = assignedBoxGlobal();
     if (dm.w <= 0 || dm.h <= 0)
         return;
