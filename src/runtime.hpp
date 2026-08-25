@@ -26,10 +26,11 @@ bool shinyCanBindVao(int vao);
 // configured >= 0 wins (including 0 = no ring); -1 follows general.
 int shinyResolvedBorderSize(int configured, int generalBorderSize);
 
-// Reserved extent after enabled / active_only / focus. 0 if the plugin
-// is off, or active_only and this window is not focused. Otherwise
-// resolvedPx. Positioning uses this; drawing still uses the resolved px.
-int shinyEffectiveBorderSize(int resolvedPx, bool enabled, bool activeOnly, bool focused);
+// Reserved extent after enabled. 0 if the plugin is off, otherwise
+// resolvedPx. Unfocused windows still reserve (active_only only skips
+// the shader / pulse / heading). Positioning uses this; drawing still
+// uses the resolved px.
+int shinyEffectiveBorderSize(int resolvedPx, bool enabled);
 
 // Shader-path ring thickness: logical × monitor scale × renderModif combinedScale.
 // SData.borderSize stores logical (unscaled) px; pass that in. Pre-scaling

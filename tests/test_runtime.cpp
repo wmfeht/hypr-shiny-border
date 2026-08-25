@@ -110,11 +110,10 @@ static void checkPulseDecisions() {
 }
 
 static void checkEffectiveBorderSize() {
-    CHECK(shinyEffectiveBorderSize(3, false, true, true) == 0);
-    CHECK(shinyEffectiveBorderSize(3, true, true, false) == 0);
-    CHECK(shinyEffectiveBorderSize(3, true, true, true) == 3);
-    CHECK(shinyEffectiveBorderSize(3, true, false, false) == 3);
-    CHECK(shinyEffectiveBorderSize(0, true, true, true) == 0);
+    CHECK(shinyEffectiveBorderSize(3, false) == 0);
+    CHECK(shinyEffectiveBorderSize(3, true) == 3);
+    CHECK(shinyEffectiveBorderSize(0, true) == 0);
+    CHECK(shinyEffectiveBorderSize(0, false) == 0);
 }
 
 static void checkUpdateWindowActions() {
@@ -142,7 +141,7 @@ static void checkUpdateWindowActions() {
     CHECK(a.reposition);
     CHECK(a.damage);
 
-    // Same geo, effective 3 → 0 (enabled off / active_only unfocused).
+    // Same geo, effective 3 → 0 (enabled off).
     a = shinyUpdateWindowActions(geo, 0, geo, 3);
     CHECK(a.reposition);
     CHECK(a.damage);

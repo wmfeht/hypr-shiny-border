@@ -25,10 +25,8 @@ int shinyResolvedBorderSize(int configured, int generalBorderSize) {
     return generalBorderSize;
 }
 
-int shinyEffectiveBorderSize(int resolvedPx, bool enabled, bool activeOnly, bool focused) {
+int shinyEffectiveBorderSize(int resolvedPx, bool enabled) {
     if (!enabled)
-        return 0;
-    if (activeOnly && !focused)
         return 0;
     return resolvedPx;
 }

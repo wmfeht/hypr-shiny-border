@@ -105,9 +105,7 @@ int CShinyBorder::borderSize() const {
 }
 
 int CShinyBorder::effectiveBorderSize() const {
-    const auto PWINDOW = m_window.lock();
-    const bool focused = PWINDOW && PWINDOW == Desktop::focusState()->window();
-    return shinyEffectiveBorderSize(borderSize(), g_cfg.enabled->value(), g_cfg.activeOnly->value(), focused);
+    return shinyEffectiveBorderSize(borderSize(), g_cfg.enabled->value());
 }
 
 void CShinyBorder::syncExtents() {
