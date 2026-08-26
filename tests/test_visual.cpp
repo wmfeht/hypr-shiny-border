@@ -184,8 +184,10 @@ static void checkShaderSource() {
 static void checkProductionWiring() {
     const std::string deco = readFile(sourceDir() + "/deco.cpp");
     const std::string pass = readFile(sourceDir() + "/pass.cpp");
+    const std::string plug = readFile(sourceDir() + "/main.cpp");
     CHECK(!deco.empty());
     CHECK(!pass.empty());
+    CHECK(!plug.empty());
 
     CHECK(deco.find("data.angle") != std::string::npos);
     CHECK(deco.find("m_angle") != std::string::npos);
@@ -196,6 +198,18 @@ static void checkProductionWiring() {
     CHECK(pass.find("m_data.angle") != std::string::npos);
     CHECK(pass.find("SHADER_POINTER") == std::string::npos);
     CHECK(pass.find("m_data.pointer") == std::string::npos);
+
+    // Shimmer is CPU-modulated: the deco steps the walk and hands the pass a
+    // final angle / lobe / thickness scale; the shader stays pulse-or-nominal.
+    CHECK(deco.find("shinyShimmerStep") != std::string::npos);
+    CHECK(deco.find("shinyShimmerLobe") != std::string::npos);
+    CHECK(deco.find("SHINY_EFFECT_PULSE") != std::string::npos);
+    CHECK(pass.find("m_data.thickScale") != std::string::npos);
+
+    // Pin replaces the mouse latch: the deco computes the pinned heading and
+    // the mouse-move listener bails out before touching any latch.
+    CHECK(deco.find("shinyPinnedHeading") != std::string::npos);
+    CHECK(plug.find("g_cfg.pin->value()") != std::string::npos);
 }
 
 int main() {

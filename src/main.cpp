@@ -33,6 +33,10 @@ static void onMouseMove() {
     if (!g_cfg.enabled->value())
         return;
 
+    // Pinned heading ignores the cursor entirely; draw() computes it live.
+    if (g_cfg.pin->value())
+        return;
+
     const auto cursor = g_pInputManager->getMouseCoordsInternal();
 
     for (auto& w : Desktop::windowState()->windows()) {
@@ -92,14 +96,26 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_cfg.enabled      = makeShared<Config::Values::CBoolValue>("plugin:shiny-border:enabled", "Master switch", true);
     g_cfg.activeOnly   = makeShared<Config::Values::CBoolValue>("plugin:shiny-border:active_only", "Only the focused window tracks / pulses; unfocused keep padding", true);
     g_cfg.pulse        = makeShared<Config::Values::CBoolValue>("plugin:shiny-border:pulse", "Oscillate highlight width and thickness", true);
+    g_cfg.shimmer      = makeShared<Config::Values::CBoolValue>("plugin:shiny-border:shimmer", "Randomly wander and resize the highlight; exclusive with pulse (shimmer wins)", false);
+    g_cfg.pin          = makeShared<Config::Values::CBoolValue>("plugin:shiny-border:pin", "Pin the highlight to pin_deg instead of following the mouse", false);
     g_cfg.quantizeDeg  = makeShared<Config::Values::CIntValue>("plugin:shiny-border:quantize_deg", "Snap heading to this many degrees; applies while pulse is on", 1,
                                                                Config::Values::SIntValueOptions{.min = 1, .max = 45});
     g_cfg.angleOffset  = makeShared<Config::Values::CIntValue>("plugin:shiny-border:angle_offset", "Degrees added to the comet heading", 0,
                                                                Config::Values::SIntValueOptions{.min = -180, .max = 180});
+    g_cfg.pinDeg       = makeShared<Config::Values::CIntValue>("plugin:shiny-border:pin_deg", "Pinned heading, degrees CCW; 0 = right, 90 = up", 90,
+                                                               Config::Values::SIntValueOptions{.min = -360, .max = 360});
+    g_cfg.shimmerDeg   = makeShared<Config::Values::CIntValue>("plugin:shiny-border:shimmer_deg", "Max shimmer wander each side of the heading, degrees", 25,
+                                                               Config::Values::SIntValueOptions{.min = 0, .max = 180});
     g_cfg.borderSize   = makeShared<Config::Values::CIntValue>("plugin:shiny-border:border_size", "Border px, -1 = general:border_size", 3,
                                                                Config::Values::SIntValueOptions{.min = -1, .max = 20});
     g_cfg.pulseHz      = makeShared<Config::Values::CFloatValue>("plugin:shiny-border:pulse_hz", "Oscillation rate; 0 disables", 0.4,
                                                                  Config::Values::SFloatValueOptions{.min = 0.f, .max = 4.f});
+    g_cfg.shimmerHz    = makeShared<Config::Values::CFloatValue>("plugin:shiny-border:shimmer_hz", "Average shimmer retargets per second; 0 disables", 0.6,
+                                                                 Config::Values::SFloatValueOptions{.min = 0.f, .max = 4.f});
+    g_cfg.shimmerScaleMin = makeShared<Config::Values::CFloatValue>("plugin:shiny-border:shimmer_scale_min", "Lower bound of the shimmer size scale", 0.75,
+                                                                    Config::Values::SFloatValueOptions{.min = 0.2f, .max = 3.f});
+    g_cfg.shimmerScaleMax = makeShared<Config::Values::CFloatValue>("plugin:shiny-border:shimmer_scale_max", "Upper bound of the shimmer size scale", 1.35,
+                                                                    Config::Values::SFloatValueOptions{.min = 0.2f, .max = 3.f});
     g_cfg.lobe         = makeShared<Config::Values::CFloatValue>("plugin:shiny-border:lobe", "Highlight half-width as a fraction of the circle", 0.18,
                                                                 Config::Values::SFloatValueOptions{.min = 0.04, .max = 0.5});
     g_cfg.colA         = makeShared<Config::Values::CColorValue>("plugin:shiny-border:col.a", "Highlight head (ARGB)", 0xee33ccff);
@@ -108,10 +124,17 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.enabled);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.activeOnly);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.pulse);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.shimmer);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.pin);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.quantizeDeg);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.angleOffset);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.pinDeg);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.shimmerDeg);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.borderSize);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.pulseHz);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.shimmerHz);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.shimmerScaleMin);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.shimmerScaleMax);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.lobe);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.colA);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.colB);

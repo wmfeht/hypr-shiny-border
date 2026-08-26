@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
@@ -24,6 +25,8 @@ using namespace Desktop::View;
 CShinyBorder::CShinyBorder(PHLWINDOW window) : IHyprWindowDecoration(window), m_window(window) {
     m_lastPos  = window->position(IGeometric::GEOMETRIC_CURRENT);
     m_lastSize = window->size(IGeometric::GEOMETRIC_CURRENT);
+    // Per-deco stream so overlapping windows do not shimmer in unison.
+    shinyShimmerSeed(m_shimmer, sc<uint32_t>(reinterpret_cast<uintptr_t>(this) >> 4));
     syncPulse();
 }
 
@@ -36,18 +39,33 @@ CShinyBorder::~CShinyBorder() {
     m_pulseTimer.reset();
 }
 
+ShinyEffect CShinyBorder::effectMode() const {
+    return shinyEffectMode(g_cfg.pulse->value(), sc<float>(g_cfg.pulseHz->value()), g_cfg.shimmer->value(),
+                           sc<float>(g_cfg.shimmerHz->value()));
+}
+
+ShinyShimmerParams CShinyBorder::shimmerParams() const {
+    const float pi = std::acos(-1.f);
+    return ShinyShimmerParams{
+        .hz            = sc<float>(g_cfg.shimmerHz->value()),
+        .angleRangeRad = sc<float>(g_cfg.shimmerDeg->value()) * pi / 180.f,
+        .scaleMin      = sc<float>(g_cfg.shimmerScaleMin->value()),
+        .scaleMax      = sc<float>(g_cfg.shimmerScaleMax->value()),
+    };
+}
+
 bool CShinyBorder::pulseWanted() const {
     const auto PWINDOW = m_window.lock();
     const bool focused = PWINDOW && PWINDOW == Desktop::focusState()->window();
-    return shinyPulseShouldRun(g_cfg.enabled->value(), g_cfg.pulse->value(), sc<float>(g_cfg.pulseHz->value()),
-                               g_cfg.activeOnly->value(), focused);
+    return shinyEffectShouldRun(g_cfg.enabled->value(), effectMode(), g_cfg.activeOnly->value(), focused);
 }
 
 void CShinyBorder::startPulse() {
     if (!g_pEventLoopManager)
         return;
 
-    const auto period = std::chrono::milliseconds(shinyPulseTickMs(sc<float>(g_cfg.pulseHz->value())));
+    const auto period = std::chrono::milliseconds(
+        shinyEffectTickMs(effectMode(), sc<float>(g_cfg.pulseHz->value()), sc<float>(g_cfg.shimmerHz->value())));
 
     if (!m_pulseTimer) {
         m_pulseTimer = makeShared<CEventLoopTimer>(
@@ -64,6 +82,7 @@ void CShinyBorder::startPulse() {
 }
 
 void CShinyBorder::stopPulse() {
+    m_lastShimmerTick.reset();
     if (!m_pulseTimer)
         return;
     // Disarm only — cancel() is sticky and would prevent a later re-arm.
@@ -80,9 +99,23 @@ void CShinyBorder::onPulseTick(SP<CEventLoopTimer> self) {
         damageEntire();
         return;
     }
+
+    const auto mode = effectMode();
+    if (mode == SHINY_EFFECT_SHIMMER) {
+        const auto now = std::chrono::steady_clock::now();
+        float      dt  = 0.f;
+        if (m_lastShimmerTick)
+            dt = std::clamp(std::chrono::duration<float>(now - *m_lastShimmerTick).count(), 0.f, 0.25f);
+        m_lastShimmerTick = now;
+        shinyShimmerStep(m_shimmer, dt, shimmerParams());
+    } else {
+        m_lastShimmerTick.reset();
+    }
+
     damageEntire();
     if (self)
-        self->updateTimeout(std::chrono::milliseconds(shinyPulseTickMs(sc<float>(g_cfg.pulseHz->value()))));
+        self->updateTimeout(std::chrono::milliseconds(
+            shinyEffectTickMs(mode, sc<float>(g_cfg.pulseHz->value()), sc<float>(g_cfg.shimmerHz->value()))));
 }
 
 void CShinyBorder::syncPulse() {
@@ -198,24 +231,42 @@ void CShinyBorder::draw(PHLMONITOR pMonitor, float const& a) {
     };
     const auto mapped = shinyMapDrawBackends(shared, pMonitor->m_scale);
 
+    // Pin replaces the mouse latch entirely; angle_offset still applies.
+    const float baseAngle = g_cfg.pin->value()
+        ? shinyPinnedHeading(sc<int>(g_cfg.pinDeg->value()), sc<int>(g_cfg.angleOffset->value()))
+        : m_angle;
+
+    const auto mode       = effectMode();
+    float      drawAngle  = baseAngle;
+    float      lobe       = sc<float>(g_cfg.lobe->value());
+    float      thickScale = 1.f;
+    if (mode == SHINY_EFFECT_SHIMMER) {
+        drawAngle  = shinyWrapAngle(baseAngle + m_shimmer.angle.value);
+        lobe       = shinyShimmerLobe(lobe, m_shimmer.scale.value);
+        thickScale = shinyShimmerThickScale(m_shimmer.scale.value);
+    }
+
     if (ensureShinyShader()) {
         CShinyPassElement::SData data;
         data.shared = mapped.shader;
         data.box    = outerBox;
-        data.angle  = m_angle;
+        data.angle  = drawAngle;
         const double seconds =
             std::chrono::duration<double>(Time::steadyNow() - g_pHyprRenderer->m_globalTimer.chrono()).count();
-        const auto pulseU = shinyPulseUniforms(g_cfg.pulse->value(), seconds, sc<float>(g_cfg.pulseHz->value()));
+        // Shimmer is exclusive with pulse: zero uniforms take the shader's
+        // nominal branch, and the shimmer channels modulate angle/lobe here.
+        const auto pulseU = shinyPulseUniforms(mode == SHINY_EFFECT_PULSE, seconds, sc<float>(g_cfg.pulseHz->value()));
         data.time         = pulseU.time;
         data.pulseHz      = pulseU.pulseHz;
-        data.lobe         = sc<float>(g_cfg.lobe->value());
+        data.lobe         = lobe;
+        data.thickScale   = thickScale;
         g_pHyprRenderer->addPassElement(makeUnique<CShinyPassElement>(data));
         return;
     }
 
     CBox windowBox = outerBox.copy().expand(-mapped.fallback.expandPx).round();
     Config::CGradientValueData grad(
-        {CHyprColor{mapped.fallback.shared.colA}, CHyprColor{mapped.fallback.shared.colB}}, m_angle);
+        {CHyprColor{mapped.fallback.shared.colA}, CHyprColor{mapped.fallback.shared.colB}}, drawAngle);
 
     CBorderPassElement::SBorderData data;
     data.box           = windowBox;

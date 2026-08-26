@@ -124,7 +124,7 @@ std::vector<UP<IPassElement>> CShinyPassElement::draw() {
     shader->setUniformFloat(SHADER_RADIUS, sc<float>(m_data.shared.rounding) * modifScale);
     shader->setUniformFloat(SHADER_RADIUS_OUTER, sc<float>(m_data.shared.outerRound) * modifScale);
     shader->setUniformFloat(SHADER_ROUNDING_POWER, m_data.shared.roundingPower);
-    shader->setUniformFloat(SHADER_THICK, shinyShaderThick(sc<float>(m_data.shared.borderSize), sc<float>(mon->m_scale), modifScale));
+    shader->setUniformFloat(SHADER_THICK, shinyShaderThick(sc<float>(m_data.shared.borderSize), sc<float>(mon->m_scale), modifScale) * m_data.thickScale);
     shader->setUniformFloat(SHADER_TIME, m_data.time);
     shader->setUniformFloat(SHADER_ALPHA, m_data.shared.a);
     shader->setUniformFloat(SHADER_RANGE, m_data.lobe);

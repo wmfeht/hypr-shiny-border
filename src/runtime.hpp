@@ -122,3 +122,75 @@ ShinyPulseUniforms shinyPulseUniforms(bool pulse, double clockSeconds, float hz)
 // smaller than one sine cycle (1/pulseHz) so compositor-time sampling
 // does not hitch. Not a process-wide tick.
 int shinyPulseTickMs(float pulseHz);
+
+// Which oscillation drives the ring. Shimmer and pulse are mutually
+// exclusive: shimmer wins when both are configured on. An effect whose
+// hz is <= 0 is off and falls through (shimmer_hz 0 + pulse on → pulse).
+enum ShinyEffect {
+    SHINY_EFFECT_NONE = 0,
+    SHINY_EFFECT_PULSE,
+    SHINY_EFFECT_SHIMMER,
+};
+
+ShinyEffect shinyEffectMode(bool pulse, float pulseHz, bool shimmer, float shimmerHz);
+
+// Timer gate for whichever effect is active. Same shape as
+// shinyPulseShouldRun but mode-driven: false when the plugin is off or
+// no effect is on; active_only → only the focused deco keeps a timer.
+bool shinyEffectShouldRun(bool enabled, ShinyEffect mode, bool activeOnly, bool focused);
+
+// Re-arm period for the active effect. Pulse samples its sine; shimmer
+// samples its eased random walk. Same clamp as shinyPulseTickMs.
+int shinyEffectTickMs(ShinyEffect mode, float pulseHz, float shimmerHz);
+
+// Wrap radians into [0, 2π). Shimmer adds a signed offset to the latched
+// heading; the shader and the fallback gradient both expect a wrapped angle.
+float shinyWrapAngle(float radians);
+
+// Pinned heading: (pinDeg + offsetDeg) degrees → radians in [0, 2π).
+// GLSL atan(-y, x) convention: 0° faces +x (right), 90° faces up.
+// Replaces the mouse latch when pin is on; angle_offset still applies.
+float shinyPinnedHeading(int pinDeg, int offsetDeg);
+
+// Shimmer: two independent random-walk channels. Each channel eases
+// (smoothstep) from its current value to a random target, then draws a
+// new target and a new duration — angle and scale retarget on their own
+// clocks, so heading drift and resize are visibly decoupled.
+struct ShinyShimmerChannel {
+    float value = 0.f;
+    float from  = 0.f;
+    float to    = 0.f;
+    float t     = 0.f; // elapsed seconds within the current ease
+    float dur   = 0.f; // <= 0 means "pick a target on the next step"
+};
+
+struct ShinyShimmerState {
+    ShinyShimmerChannel angle; // signed radians around the base heading
+    ShinyShimmerChannel scale = {.value = 1.f, .from = 1.f, .to = 1.f};
+    uint32_t            rng   = 0x9E3779B9u; // xorshift32; never 0
+};
+
+struct ShinyShimmerParams {
+    float hz            = 0.6f;     // average retargets per second, per channel
+    float angleRangeRad = 0.4363f;  // max |offset| from the base heading (±25°)
+    float scaleMin      = 0.75f;    // lobe / thickness scale bounds; swapped if inverted
+    float scaleMax      = 1.35f;
+};
+
+// Deterministic per-deco stream. seed 0 would wedge xorshift32 at 0 —
+// it is replaced with a fixed non-zero constant.
+void shinyShimmerSeed(ShinyShimmerState& s, uint32_t seed);
+
+// Advance both channels by dt seconds. hz <= 0 or dt <= 0 is a no-op.
+// angle.value stays within ±angleRangeRad; scale.value converges into
+// [scaleMin, scaleMax] (one ease if it starts outside).
+void shinyShimmerStep(ShinyShimmerState& s, float dt, const ShinyShimmerParams& p);
+
+// Effective highlight half-width: lobe × shimmer scale, clamped to the
+// same [0.04, 0.5] the config allows so a wild scale range cannot draw
+// a degenerate or full-circle lobe.
+float shinyShimmerLobe(float lobe, float scale);
+
+// Ring thickness responds to the scale channel too, but muted (35%),
+// mirroring how pulse breathes spread harder than thickness.
+float shinyShimmerThickScale(float scale);

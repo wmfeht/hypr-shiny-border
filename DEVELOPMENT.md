@@ -24,6 +24,13 @@ relative to the window.
   `CBorderPassElement`
 - optional pulse lives on the decoration (`CEventLoopTimer`), not a global
   `render.pre` scan
+- optional shimmer reuses that timer, exclusive with pulse (shimmer wins):
+  two CPU-side random walks (`shinyShimmerStep`, seeded per deco) modulate the
+  heading and the highlight size, then the pass gets a final angle / lobe /
+  thickness scale — the shader draws its nominal branch, no new uniforms
+- optional pin (`pin` / `pin_deg`) replaces the mouse latch with a fixed
+  heading; `onMouseMove` bails out early and `draw` computes the pinned angle
+  live, so pulse/shimmer still animate around it
 
 `active_only` (default on) means only the focused window tracks the cursor and
 pulses. Unfocused windows have **no** ring, but they still reserve the same
