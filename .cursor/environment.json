@@ -1,0 +1,4 @@
+{
+  "name": "hypr-shiny-border",
+  "install": "bash .cursor/install.sh"
+}
