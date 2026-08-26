@@ -16,10 +16,11 @@ class CShinyPassElement : public IPassElement {
         // combinedScale() at upload. Do not store already-scaled borderSize.
         ShinyDrawShared shared;
         CBox            box;      // scaled, monitor-local, outer; includes m_floatingOffset
-        float           angle   = 0.f; // latched heading, radians, quantized + offset
+        float           angle   = 0.f; // drawn heading, radians: latched or pinned, plus shimmer
         float           time    = 0.f;
         float           pulseHz = 0.4f;
-        float           lobe    = 0.18f;
+        float           lobe    = 0.18f; // effective half-width; shimmer scale already applied
+        float           thickScale = 1.f; // shimmer thickness modulation; 1 when not shimmering
     };
 
     CShinyPassElement(const SData& data);

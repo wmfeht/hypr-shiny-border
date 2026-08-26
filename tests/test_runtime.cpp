@@ -1,5 +1,6 @@
 #include "../src/runtime.hpp"
 
+#include <cmath>
 #include <cstdio>
 
 static int g_fails = 0;
@@ -109,6 +110,140 @@ static void checkPulseDecisions() {
     CHECK(shinyPulseTickMs(4.f) < static_cast<int>(1000.f / 4.f));
 }
 
+static void checkEffectExclusivity() {
+    // Shimmer wins when both are configured on.
+    CHECK(shinyEffectMode(true, 0.4f, true, 0.6f) == SHINY_EFFECT_SHIMMER);
+    CHECK(shinyEffectMode(false, 0.4f, true, 0.6f) == SHINY_EFFECT_SHIMMER);
+
+    // Shimmer off or hz <= 0 falls through to pulse.
+    CHECK(shinyEffectMode(true, 0.4f, false, 0.6f) == SHINY_EFFECT_PULSE);
+    CHECK(shinyEffectMode(true, 0.4f, true, 0.f) == SHINY_EFFECT_PULSE);
+    CHECK(shinyEffectMode(true, 0.4f, true, -1.f) == SHINY_EFFECT_PULSE);
+
+    // Pulse hz <= 0 disables pulse too.
+    CHECK(shinyEffectMode(true, 0.f, false, 0.6f) == SHINY_EFFECT_NONE);
+    CHECK(shinyEffectMode(false, 0.4f, false, 0.6f) == SHINY_EFFECT_NONE);
+    CHECK(shinyEffectMode(true, 0.f, true, 0.f) == SHINY_EFFECT_NONE);
+
+    // Timer gate: same shape as the pulse gate, but mode-driven.
+    CHECK(!shinyEffectShouldRun(true, SHINY_EFFECT_NONE, true, true));
+    CHECK(!shinyEffectShouldRun(false, SHINY_EFFECT_SHIMMER, true, true));
+    CHECK(!shinyEffectShouldRun(true, SHINY_EFFECT_SHIMMER, true, false));
+    CHECK(shinyEffectShouldRun(true, SHINY_EFFECT_SHIMMER, true, true));
+    CHECK(shinyEffectShouldRun(true, SHINY_EFFECT_SHIMMER, false, false));
+    CHECK(shinyEffectShouldRun(true, SHINY_EFFECT_PULSE, true, true));
+
+    // Tick period follows the active effect's hz.
+    CHECK(shinyEffectTickMs(SHINY_EFFECT_PULSE, 0.4f, 4.f) == shinyPulseTickMs(0.4f));
+    CHECK(shinyEffectTickMs(SHINY_EFFECT_SHIMMER, 0.4f, 4.f) == shinyPulseTickMs(4.f));
+    CHECK(shinyEffectTickMs(SHINY_EFFECT_SHIMMER, 0.4f, 0.6f) > 0);
+    CHECK(shinyEffectTickMs(SHINY_EFFECT_SHIMMER, 0.4f, 0.6f) < static_cast<int>(1000.f / 0.6f));
+}
+
+static void checkPinnedHeading() {
+    const float pi = std::acos(-1.f);
+
+    CHECK(std::fabs(shinyPinnedHeading(0, 0)) < 1e-5f);
+    CHECK(std::fabs(shinyPinnedHeading(90, 0) - pi * 0.5f) < 1e-5f);
+    CHECK(std::fabs(shinyPinnedHeading(180, 0) - pi) < 1e-5f);
+
+    // angle_offset still applies, and the sum wraps into [0, 2π).
+    CHECK(std::fabs(shinyPinnedHeading(350, 20) - 10.f * pi / 180.f) < 1e-4f);
+    CHECK(std::fabs(shinyPinnedHeading(-90, 0) - 270.f * pi / 180.f) < 1e-4f);
+
+    const float p = shinyPinnedHeading(-360, -180);
+    CHECK(p >= 0.f);
+    CHECK(p < 2.f * pi);
+
+    // Wrap helper on its own.
+    CHECK(std::fabs(shinyWrapAngle(2.f * pi + 0.1f) - 0.1f) < 1e-4f);
+    CHECK(std::fabs(shinyWrapAngle(-0.1f) - (2.f * pi - 0.1f)) < 1e-4f);
+    CHECK(shinyWrapAngle(0.f) == 0.f);
+}
+
+static void checkShimmer() {
+    const ShinyShimmerParams p{.hz = 0.6f, .angleRangeRad = 0.4363f, .scaleMin = 0.75f, .scaleMax = 1.35f};
+
+    // hz <= 0 or dt <= 0 → no-op.
+    ShinyShimmerState idle;
+    shinyShimmerSeed(idle, 7);
+    shinyShimmerStep(idle, 0.f, p);
+    CHECK(idle.angle.value == 0.f);
+    CHECK(idle.scale.value == 1.f);
+    shinyShimmerStep(idle, 0.016f, ShinyShimmerParams{.hz = 0.f});
+    CHECK(idle.angle.value == 0.f);
+    CHECK(idle.scale.value == 1.f);
+
+    // Determinism: same seed, same steps → same values.
+    ShinyShimmerState a, b;
+    shinyShimmerSeed(a, 42);
+    shinyShimmerSeed(b, 42);
+    for (int i = 0; i < 500; i++) {
+        shinyShimmerStep(a, 0.016f, p);
+        shinyShimmerStep(b, 0.016f, p);
+    }
+    CHECK(a.angle.value == b.angle.value);
+    CHECK(a.scale.value == b.scale.value);
+
+    // Seed 0 must not wedge xorshift at 0 (state would never move).
+    ShinyShimmerState z;
+    shinyShimmerSeed(z, 0);
+    for (int i = 0; i < 500; i++)
+        shinyShimmerStep(z, 0.016f, p);
+    CHECK(z.scale.value != 1.f || z.angle.value != 0.f);
+
+    // Bounds + actual movement over a long run.
+    ShinyShimmerState s;
+    shinyShimmerSeed(s, 1234);
+    float minAngle = 1e9f, maxAngle = -1e9f, minScale = 1e9f, maxScale = -1e9f;
+    for (int i = 0; i < 4000; i++) { // ~64 s at 16 ms
+        shinyShimmerStep(s, 0.016f, p);
+        minAngle = std::fmin(minAngle, s.angle.value);
+        maxAngle = std::fmax(maxAngle, s.angle.value);
+        minScale = std::fmin(minScale, s.scale.value);
+        maxScale = std::fmax(maxScale, s.scale.value);
+        CHECK(std::fabs(s.angle.value) <= p.angleRangeRad + 1e-5f);
+        CHECK(s.scale.value >= p.scaleMin - 1e-5f);
+        CHECK(s.scale.value <= p.scaleMax + 1e-5f);
+    }
+    // The walk visits both sides of the heading and actually resizes.
+    CHECK(minAngle < -0.01f);
+    CHECK(maxAngle > 0.01f);
+    CHECK(maxScale - minScale > 0.1f);
+
+    // Independence: the two channels draw separate durations, so their
+    // retarget clocks are not in lockstep.
+    CHECK(s.angle.dur != s.scale.dur);
+    CHECK(s.angle.t != s.scale.t || s.angle.dur != s.scale.dur);
+
+    // Inverted scale range is swapped, not a hole.
+    ShinyShimmerState inv;
+    shinyShimmerSeed(inv, 99);
+    const ShinyShimmerParams pInv{.hz = 1.f, .angleRangeRad = 0.1f, .scaleMin = 1.4f, .scaleMax = 0.8f};
+    for (int i = 0; i < 2000; i++) {
+        shinyShimmerStep(inv, 0.016f, pInv);
+        CHECK(inv.scale.value >= 0.8f - 1e-5f);
+        CHECK(inv.scale.value <= 1.4f + 1e-5f);
+    }
+
+    // Zero angle range: the offset eases to 0 and stays there.
+    ShinyShimmerState flat;
+    shinyShimmerSeed(flat, 5);
+    const ShinyShimmerParams pFlat{.hz = 1.f, .angleRangeRad = 0.f, .scaleMin = 0.9f, .scaleMax = 1.1f};
+    for (int i = 0; i < 2000; i++)
+        shinyShimmerStep(flat, 0.016f, pFlat);
+    CHECK(std::fabs(flat.angle.value) < 1e-5f);
+
+    // Effective lobe clamps to the config range; thickness stays muted.
+    CHECK(shinyShimmerLobe(0.18f, 1.f) == 0.18f);
+    CHECK(shinyShimmerLobe(0.18f, 10.f) == 0.5f);
+    CHECK(shinyShimmerLobe(0.18f, 0.01f) == 0.04f);
+    CHECK(shinyShimmerThickScale(1.f) == 1.f);
+    CHECK(shinyShimmerThickScale(2.f) < 2.f);
+    CHECK(shinyShimmerThickScale(2.f) > 1.f);
+    CHECK(shinyShimmerThickScale(0.f) > 0.f);
+}
+
 static void checkEffectiveBorderSize() {
     CHECK(shinyEffectiveBorderSize(3, false) == 0);
     CHECK(shinyEffectiveBorderSize(3, true) == 3);
@@ -160,6 +295,9 @@ static void checkUpdateWindowActions() {
 int main() {
     checkShippedDecisions();
     checkPulseDecisions();
+    checkEffectExclusivity();
+    checkPinnedHeading();
+    checkShimmer();
     checkEffectiveBorderSize();
     checkUpdateWindowActions();
 

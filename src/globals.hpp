@@ -13,10 +13,17 @@ struct SShinyConfig {
     SP<Config::Values::CBoolValue>  enabled;
     SP<Config::Values::CBoolValue>  activeOnly;
     SP<Config::Values::CBoolValue>  pulse;
+    SP<Config::Values::CBoolValue>  shimmer;
+    SP<Config::Values::CBoolValue>  pin;
     SP<Config::Values::CIntValue>   quantizeDeg;
     SP<Config::Values::CIntValue>   angleOffset;
+    SP<Config::Values::CIntValue>   pinDeg;
+    SP<Config::Values::CIntValue>   shimmerDeg;
     SP<Config::Values::CIntValue>   borderSize;
     SP<Config::Values::CFloatValue> pulseHz;
+    SP<Config::Values::CFloatValue> shimmerHz;
+    SP<Config::Values::CFloatValue> shimmerScaleMin;
+    SP<Config::Values::CFloatValue> shimmerScaleMax;
     SP<Config::Values::CFloatValue> lobe;
     SP<Config::Values::CColorValue> colA;
     SP<Config::Values::CColorValue> colB;

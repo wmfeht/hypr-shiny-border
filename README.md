@@ -30,6 +30,17 @@ color and the highlight lags the mouse.
 pulses. `enabled = false` reserves 0 px, so turning the plugin off does not
 leave a gap.
 
+Two optional looks on top of the comet:
+
+- **Shimmer** (`shimmer = true`): instead of breathing in place, the highlight
+  wanders randomly around its heading (within `shimmer_deg`) and randomly
+  resizes (within `shimmer_scale_min`..`shimmer_scale_max`). The two walks
+  retarget on independent clocks, so drift and resize are visibly decoupled.
+  Shimmer is exclusive with `pulse` — when both are on, shimmer wins.
+- **Pin** (`pin = true`): the highlight stops following the mouse and stays at
+  `pin_deg` (degrees CCW, `0` = right, `90` = up). Pulse or shimmer still
+  animate around the pinned heading.
+
 Hacking on the plugin itself is in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Install
@@ -40,7 +51,7 @@ and loads it through `hyprctl plugin load`.
 
 `hyprpm add` clones the **default branch** (`main`). `hyprpm.toml` pins
 Hyprland **v0.56.2** (`efb50993780079460b0cbed1363e2166a2de1d9f`) to plugin
-commit `4b0ee3dee710014a79ec1b28907d4bfd26561a20`. If no pin matches, hyprpm
+commit `50669e41b7c12e6371b6158c654330e41fd3c4fa`. If no pin matches, hyprpm
 builds `HEAD`.
 
 ```sh
@@ -158,6 +169,15 @@ if shinyLoaded() then
         quantize_deg = 1,    -- snap heading; applies while pulse is on; 5 is cheaper
         angle_offset = 0,    -- degrees added to the comet heading; 90 if the head is flipped
         border_size  = 1,    -- 1px sheen; plugin default is 3; -1 = general:border_size
+        -- shimmer instead of pulse (shimmer wins when both are on):
+        -- shimmer           = true,
+        -- shimmer_hz        = 0.6,  -- average retargets per second; 0 disables
+        -- shimmer_deg       = 25,   -- max wander each side of the heading
+        -- shimmer_scale_min = 0.75, -- highlight size scale bounds
+        -- shimmer_scale_max = 1.35,
+        -- pinned heading instead of the mouse:
+        -- pin     = true,
+        -- pin_deg = 90,             -- degrees CCW; 0 = right, 90 = up
         col = {
           a = "rgba(33ccffee)", -- highlight head
           b = "rgba(00ff99ee)", -- shoulder
@@ -176,9 +196,16 @@ end
 | `active_only` | `true` | only the focused window tracks / pulses; unfocused keep the padding, no ring |
 | `pulse` | `true` | breathe highlight width and thickness |
 | `pulse_hz` | `0.4` | oscillation rate; `0` disables (same as `pulse = false` for the timer) |
+| `shimmer` | `false` | randomly wander and resize the highlight; exclusive with `pulse` (shimmer wins) |
+| `shimmer_hz` | `0.6` | average shimmer retargets per second; `0` disables |
+| `shimmer_deg` | `25` | max shimmer wander each side of the heading, degrees |
+| `shimmer_scale_min` | `0.75` | lower bound of the shimmer size scale |
+| `shimmer_scale_max` | `1.35` | upper bound of the shimmer size scale |
+| `pin` | `false` | pin the highlight to `pin_deg` instead of following the mouse |
+| `pin_deg` | `90` | pinned heading, degrees CCW; `0` = right, `90` = up |
 | `lobe` | `0.18` | highlight half-width (fraction of the circle) |
 | `quantize_deg` | `1` | snap heading to this many degrees; applies while pulse is on; larger is cheaper |
-| `angle_offset` | `0` | degrees added to the comet heading (shader and fallback) |
+| `angle_offset` | `0` | degrees added to the comet heading (shader, fallback, and pinned) |
 | `border_size` | `3` | px; `-1` follows `general:border_size`. 1px is the intended sheen |
 | `col.a` | `rgba(33ccffee)` | comet head |
 | `col.b` | `rgba(00ff99ee)` | comet shoulder |
