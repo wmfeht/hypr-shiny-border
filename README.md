@@ -51,7 +51,7 @@ and loads it through `hyprctl plugin load`.
 
 `hyprpm add` clones the **default branch** (`main`). `hyprpm.toml` pins
 Hyprland **v0.56.2** (`efb50993780079460b0cbed1363e2166a2de1d9f`) to plugin
-commit `4b0ee3dee710014a79ec1b28907d4bfd26561a20`. If no pin matches, hyprpm
+commit `50669e41b7c12e6371b6158c654330e41fd3c4fa`. If no pin matches, hyprpm
 builds `HEAD`.
 
 ```sh
