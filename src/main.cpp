@@ -125,6 +125,9 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_cfg.gradient     = makeShared<Config::Values::CGradientValue>("plugin:shiny-border:gradient",
                                                                     "Multi-step comet ramp, head first; fewer than two colors keeps col.a/col.b; angle is ignored",
                                                                     CHyprColor{0xee33ccff});
+    g_cfg.gradientPositions = makeShared<Config::Values::CStringValue>("plugin:shiny-border:gradient_positions",
+                                                                       "Ramp position per gradient color, percent of the total length (\"0 70 100\"); empty = even spacing",
+                                                                       "");
 
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.enabled);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.activeOnly);
@@ -144,6 +147,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.colA);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.colB);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.gradient);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.gradientPositions);
 
     HyprlandAPI::reloadConfig();
 

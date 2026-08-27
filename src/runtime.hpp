@@ -81,23 +81,37 @@ inline constexpr int SHINY_MAX_GRADIENT_STEPS = 8;
 // anything past the uniform array is clamped to SHINY_MAX_GRADIENT_STEPS.
 int shinyGradientStepCount(int configured);
 
-// Normalized ramp position of stop i among count stops: 0 at the comet
-// head, 1 at the far side. count < 2 or a lone stop pins to 0.
+// Normalized ramp position of stop i among count stops when spacing is
+// even: 0 at the comet head, 1 at the far side. count < 2 or a lone stop
+// pins to 0.
 float shinyGradientStopPos(int i, int count);
 
+// plugin:shiny-border:gradient_positions → per-stop ramp positions.
+// Always fills out[0..SHINY_MAX_GRADIENT_STEPS-1] — even spacing first,
+// then the custom spec on top when it is usable. Returns true only when
+// the spec applied. The spec is one percentage per color (0 = head,
+// 100 = far side), separated by spaces and/or commas, optional trailing
+// '%'. Anything else — empty spec, count mismatch, junk tokens, count < 2
+// — keeps even spacing. Values clamp into [0, 100] and each stop clamps
+// up to its predecessor, so the sequence is non-decreasing.
+bool shinyGradientResolvePositions(const char* spec, int count, float out[SHINY_MAX_GRADIENT_STEPS]);
+
 // CPU reference for the shader's piecewise-linear chain: sample the ramp
-// at u ∈ [0, 1] into rgb[3] (0..1 floats). Stops are packed ARGB uint64
-// like ShinyDrawShared colors; stop alpha is ignored — the shader shapes
-// alpha from coverage, exactly like the classic two-color path.
-// count < 2 samples stop 0 (or black when count <= 0).
-void shinyGradientSample(const uint64_t* stops, int count, float u, float rgb[3]);
+// at u ∈ [0, 1] into rgba[4] (0..1 floats). Stops are packed ARGB uint64
+// like ShinyDrawShared colors; pos are normalized stop positions (nullptr
+// = even spacing). The shader ignores stop alpha — it shapes alpha from
+// coverage like the classic path — but the fallback resample keeps it.
+// Coincident stops read as a hard step (1e-4 guard, same as the shader).
+// count < 2 samples stop 0 (or transparent black when count <= 0).
+void shinyGradientSample(const uint64_t* stops, const float* pos, int count, float u, float rgba[4]);
 
 // Shared draw fields both backends consume. Colors are packed Hyprland
 // CHyprColor uint64 (same as sc<uint64_t>(g_cfg.colA->value())).
 // borderSize is logical (unscaled) px — SHADER_THICK / CBorderPassElement
 // GL scale once. Do not store already-scaled px here.
 // stopCount 0 = classic col.a/col.b comet; 2..SHINY_MAX_GRADIENT_STEPS =
-// multi-step ramp through stops[0..stopCount-1] (head → far side).
+// multi-step ramp through stops[0..stopCount-1] (head → far side), each
+// stop placed at stopPos (normalized, from shinyGradientResolvePositions).
 struct ShinyDrawShared {
     int      rounding      = 0;
     int      outerRound    = 0;
@@ -107,6 +121,7 @@ struct ShinyDrawShared {
     uint64_t colA          = 0;
     uint64_t colB          = 0;
     uint64_t stops[SHINY_MAX_GRADIENT_STEPS] = {};
+    float    stopPos[SHINY_MAX_GRADIENT_STEPS] = {};
     int      stopCount     = 0;
 };
 

@@ -236,7 +236,9 @@ void CShinyBorder::draw(PHLMONITOR pMonitor, float const& a) {
     shared.stopCount        = shinyGradientStepCount(sc<int>(gradientCfg.m_colors.size()));
     for (int i = 0; i < shared.stopCount; i++)
         shared.stops[i] = sc<uint64_t>(gradientCfg.m_colors[sc<size_t>(i)].getAsHex());
-    const auto mapped = shinyMapDrawBackends(shared, pMonitor->m_scale);
+    const bool customPos = shinyGradientResolvePositions(g_cfg.gradientPositions->value().c_str(),
+                                                         shared.stopCount, shared.stopPos);
+    const auto mapped    = shinyMapDrawBackends(shared, pMonitor->m_scale);
 
     // Pin replaces the mouse latch entirely; angle_offset still applies.
     const float baseAngle = g_cfg.pin->value()
@@ -274,9 +276,20 @@ void CShinyBorder::draw(PHLMONITOR pMonitor, float const& a) {
     CBox windowBox = outerBox.copy().expand(-mapped.fallback.expandPx).round();
 
     // Same stop list as the shader: the ramp when configured, col.a/col.b
-    // otherwise. CBorderPassElement interpolates multi-stop natively.
+    // otherwise. CBorderPassElement interpolates multi-stop natively but
+    // only with even spacing, so custom positions are baked in by
+    // resampling the positioned ramp at evenly spaced points.
     std::vector<CHyprColor> stops;
-    if (mapped.fallback.shared.stopCount >= 2) {
+    if (mapped.fallback.shared.stopCount >= 2 && customPos) {
+        stops.reserve(SHINY_MAX_GRADIENT_STEPS);
+        for (int i = 0; i < SHINY_MAX_GRADIENT_STEPS; i++) {
+            float rgba[4];
+            shinyGradientSample(mapped.fallback.shared.stops, mapped.fallback.shared.stopPos,
+                                mapped.fallback.shared.stopCount, shinyGradientStopPos(i, SHINY_MAX_GRADIENT_STEPS),
+                                rgba);
+            stops.emplace_back(rgba[0], rgba[1], rgba[2], rgba[3]);
+        }
+    } else if (mapped.fallback.shared.stopCount >= 2) {
         stops.reserve(sc<size_t>(mapped.fallback.shared.stopCount));
         for (int i = 0; i < mapped.fallback.shared.stopCount; i++)
             stops.emplace_back(mapped.fallback.shared.stops[i]);

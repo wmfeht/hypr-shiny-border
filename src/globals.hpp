@@ -32,6 +32,9 @@ struct SShinyConfig {
     // replace it, first color at the head. The gradient's own angle is
     // ignored — the heading comes from the mouse / pin.
     SP<Config::Values::CGradientValue> gradient;
+    // Per-stop positions, one percentage per gradient color ("0 70 100").
+    // Empty (default), count mismatch, or junk = even spacing.
+    SP<Config::Values::CStringValue>   gradientPositions;
     // Pointer into Hyprland's CConfigValueBase::registry(). Bound in
     // PLUGIN_INIT, reset in PLUGIN_EXIT — must not be a function-local static
     // (that destructor runs during dlclose; flushCaches() can UAF).

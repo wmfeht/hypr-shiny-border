@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 bool shinyCanUseMappedGeometry(bool mapped, bool rendererAlive) {
     return mapped && rendererAlive;
@@ -82,33 +83,79 @@ float shinyGradientStopPos(int i, int count) {
     return static_cast<float>(clamped) / static_cast<float>(count - 1);
 }
 
-static void shinyUnpackArgb(uint64_t argb, float rgb[3]) {
-    rgb[0] = static_cast<float>((argb >> 16) & 0xFF) / 255.f;
-    rgb[1] = static_cast<float>((argb >> 8) & 0xFF) / 255.f;
-    rgb[2] = static_cast<float>(argb & 0xFF) / 255.f;
+bool shinyGradientResolvePositions(const char* spec, int count, float out[SHINY_MAX_GRADIENT_STEPS]) {
+    for (int i = 0; i < SHINY_MAX_GRADIENT_STEPS; i++)
+        out[i] = shinyGradientStopPos(i, count);
+
+    if (!spec || count < 2 || count > SHINY_MAX_GRADIENT_STEPS)
+        return false;
+
+    // One percentage per stop, or the whole spec is rejected — a partial
+    // list silently stretching the rest would be harder to reason about
+    // than "wrong count = even spacing".
+    float       parsed[SHINY_MAX_GRADIENT_STEPS];
+    int         found = 0;
+    const char* p     = spec;
+    while (*p) {
+        if (*p == ' ' || *p == '\t' || *p == ',') {
+            p++;
+            continue;
+        }
+        char*       end = nullptr;
+        const float v   = std::strtof(p, &end);
+        if (end == p)
+            return false; // junk token
+        if (*end == '%')
+            end++;
+        if (*end && *end != ' ' && *end != '\t' && *end != ',')
+            return false; // trailing junk glued to the number
+        if (found >= count)
+            return false; // more positions than colors
+        parsed[found++] = std::clamp(v, 0.f, 100.f) / 100.f;
+        p               = end;
+    }
+    if (found != count)
+        return false;
+
+    // Non-decreasing: a stop cannot sit before its predecessor.
+    for (int i = 1; i < found; i++)
+        parsed[i] = std::max(parsed[i], parsed[i - 1]);
+
+    for (int i = 0; i < found; i++)
+        out[i] = parsed[i];
+    return true;
 }
 
-void shinyGradientSample(const uint64_t* stops, int count, float u, float rgb[3]) {
-    rgb[0] = rgb[1] = rgb[2] = 0.f;
+static void shinyUnpackArgb(uint64_t argb, float rgba[4]) {
+    rgba[0] = static_cast<float>((argb >> 16) & 0xFF) / 255.f;
+    rgba[1] = static_cast<float>((argb >> 8) & 0xFF) / 255.f;
+    rgba[2] = static_cast<float>(argb & 0xFF) / 255.f;
+    rgba[3] = static_cast<float>((argb >> 24) & 0xFF) / 255.f;
+}
+
+void shinyGradientSample(const uint64_t* stops, const float* pos, int count, float u, float rgba[4]) {
+    rgba[0] = rgba[1] = rgba[2] = rgba[3] = 0.f;
     if (!stops || count <= 0)
         return;
 
-    shinyUnpackArgb(stops[0], rgb);
+    shinyUnpackArgb(stops[0], rgba);
     if (count < 2)
         return;
 
     // Same chained-mix form as the shader: each segment linearly replaces
-    // the accumulated color, so stop i sits exactly at shinyGradientStopPos.
-    const int n = std::min(count, SHINY_MAX_GRADIENT_STEPS);
-    const float pos = std::clamp(u, 0.f, 1.f);
+    // the accumulated color, so stop i sits exactly at its position. The
+    // 1e-4 denominator guard matches the shader — coincident stops become
+    // a hard step instead of a division by zero.
+    const int   n = std::min(count, SHINY_MAX_GRADIENT_STEPS);
+    const float x = std::clamp(u, 0.f, 1.f);
     for (int i = 1; i < n; i++) {
-        const float t0 = shinyGradientStopPos(i - 1, n);
-        const float t1 = shinyGradientStopPos(i, n);
-        const float w  = std::clamp((pos - t0) / (t1 - t0), 0.f, 1.f);
-        float       next[3];
+        const float t0 = pos ? pos[i - 1] : shinyGradientStopPos(i - 1, n);
+        const float t1 = pos ? pos[i] : shinyGradientStopPos(i, n);
+        const float w  = std::clamp((x - t0) / std::max(t1 - t0, 1e-4f), 0.f, 1.f);
+        float       next[4];
         shinyUnpackArgb(stops[i], next);
-        for (int c = 0; c < 3; c++)
-            rgb[c] = rgb[c] + (next[c] - rgb[c]) * w;
+        for (int c = 0; c < 4; c++)
+            rgba[c] = rgba[c] + (next[c] - rgba[c]) * w;
     }
 }
 

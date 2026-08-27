@@ -45,11 +45,14 @@ uniform float range;             // angular half-width as fraction of the circle
 uniform float brightness;        // pulse Hz; <= 0 is the nominal ring
 uniform float angle;             // latched heading, radians, already quantized + offset
 
-// Multi-step ramp (plugin:shiny-border:gradient_steps). Not in CShader's
-// uniform table — pass.cpp uploads these with raw glUniform* calls.
+// Multi-step ramp (plugin:shiny-border:gradient / gradient_positions).
+// Not in CShader's uniform table — pass.cpp uploads these with raw
+// glUniform* calls. gradPos is normalized, non-decreasing (deco resolves
+// even spacing or the custom spec CPU-side).
 const int MAX_STEPS = 8;
-uniform vec4 gradColors[MAX_STEPS];
-uniform int  gradCount;          // < 2 keeps the classic color / colorSRGB comet
+uniform vec4  gradColors[MAX_STEPS];
+uniform float gradPos[MAX_STEPS];
+uniform int   gradCount;         // < 2 keeps the classic color / colorSRGB comet
 
 const float TAU = 6.28318530718;
 const float AA  = 1.25;
@@ -119,6 +122,8 @@ void main() {
     if (gradCount >= 2) {
         // Piecewise-linear ramp: stop 0 at the head, the last stop at the
         // far side of the ring, mirrored on both sides of the heading.
+        // Stop positions come from gradPos; the 1e-4 guard turns
+        // coincident stops into a hard step instead of a divide by zero.
         // Same brightness profile as the classic branch (bright head,
         // 0.22-dim tail) so the comet shape reads identically.
         float u = clamp(d0 * 2.0, 0.0, 1.0);
@@ -126,9 +131,9 @@ void main() {
         for (int i = 1; i < MAX_STEPS; i++) {
             if (i >= gradCount)
                 break;
-            float t0 = float(i - 1) / float(gradCount - 1);
-            float t1 = float(i) / float(gradCount - 1);
-            g = mix(g, gradColors[i].rgb, clamp((u - t0) / (t1 - t0), 0.0, 1.0));
+            float t0 = gradPos[i - 1];
+            float t1 = gradPos[i];
+            g = mix(g, gradColors[i].rgb, clamp((u - t0) / max(t1 - t0, 1.0e-4), 0.0, 1.0));
         }
         rgb = mix(g * mix(0.22, 1.0, pow(cone, 0.9)), vec3(1.0), hot * 0.95);
     } else {

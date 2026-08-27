@@ -272,42 +272,48 @@ static void checkGradient() {
 
     // Two stops: endpoints are exact, the middle is the linear mix.
     const uint64_t two[] = {red, blue};
-    float          rgb[3];
-    shinyGradientSample(two, 2, 0.f, rgb);
-    CHECK(rgb[0] == 1.f && rgb[1] == 0.f && rgb[2] == 0.f);
-    shinyGradientSample(two, 2, 1.f, rgb);
-    CHECK(rgb[0] == 0.f && rgb[1] == 0.f && rgb[2] == 1.f);
-    shinyGradientSample(two, 2, 0.5f, rgb);
-    CHECK(std::fabs(rgb[0] - 0.5f) < 1e-6f);
-    CHECK(rgb[1] == 0.f);
-    CHECK(std::fabs(rgb[2] - 0.5f) < 1e-6f);
+    float          rgba[4];
+    shinyGradientSample(two, nullptr, 2, 0.f, rgba);
+    CHECK(rgba[0] == 1.f && rgba[1] == 0.f && rgba[2] == 0.f && rgba[3] == 1.f);
+    shinyGradientSample(two, nullptr, 2, 1.f, rgba);
+    CHECK(rgba[0] == 0.f && rgba[1] == 0.f && rgba[2] == 1.f);
+    shinyGradientSample(two, nullptr, 2, 0.5f, rgba);
+    CHECK(std::fabs(rgba[0] - 0.5f) < 1e-4f);
+    CHECK(rgba[1] == 0.f);
+    CHECK(std::fabs(rgba[2] - 0.5f) < 1e-4f);
 
     // u outside [0, 1] clamps to the endpoints (d0*2 never exceeds 1, but
     // the sampler is the reference for the shader's clamp).
-    shinyGradientSample(two, 2, -1.f, rgb);
-    CHECK(rgb[0] == 1.f && rgb[2] == 0.f);
-    shinyGradientSample(two, 2, 2.f, rgb);
-    CHECK(rgb[0] == 0.f && rgb[2] == 1.f);
+    shinyGradientSample(two, nullptr, 2, -1.f, rgba);
+    CHECK(rgba[0] == 1.f && rgba[2] == 0.f);
+    shinyGradientSample(two, nullptr, 2, 2.f, rgba);
+    CHECK(rgba[0] == 0.f && rgba[2] == 1.f);
 
     // Three stops: the middle stop sits exactly at u = 0.5, and the first
     // segment interpolates independently of the stops after it.
     const uint64_t three[] = {red, green, blue};
-    shinyGradientSample(three, 3, 0.5f, rgb);
-    CHECK(rgb[0] == 0.f && rgb[1] == 1.f && rgb[2] == 0.f);
-    shinyGradientSample(three, 3, 0.25f, rgb);
-    CHECK(std::fabs(rgb[0] - 0.5f) < 1e-6f);
-    CHECK(std::fabs(rgb[1] - 0.5f) < 1e-6f);
-    CHECK(rgb[2] == 0.f);
-    shinyGradientSample(three, 3, 1.f, rgb);
-    CHECK(rgb[0] == 0.f && rgb[1] == 0.f && rgb[2] == 1.f);
+    shinyGradientSample(three, nullptr, 3, 0.5f, rgba);
+    CHECK(rgba[0] == 0.f && rgba[1] == 1.f && rgba[2] == 0.f);
+    shinyGradientSample(three, nullptr, 3, 0.25f, rgba);
+    CHECK(std::fabs(rgba[0] - 0.5f) < 1e-4f);
+    CHECK(std::fabs(rgba[1] - 0.5f) < 1e-4f);
+    CHECK(rgba[2] == 0.f);
+    shinyGradientSample(three, nullptr, 3, 1.f, rgba);
+    CHECK(rgba[0] == 0.f && rgba[1] == 0.f && rgba[2] == 1.f);
+
+    // Stop alpha survives sampling (the fallback resample needs it; the
+    // shader path ignores it by design).
+    const uint64_t translucent[] = {0x80ff0000ULL, 0x00ff0000ULL};
+    shinyGradientSample(translucent, nullptr, 2, 0.5f, rgba);
+    CHECK(std::fabs(rgba[3] - 0x80 / 255.f * 0.5f) < 1e-4f);
 
     // Degenerate inputs: lone stop samples that stop, empty samples black.
-    shinyGradientSample(three, 1, 0.7f, rgb);
-    CHECK(rgb[0] == 1.f && rgb[1] == 0.f && rgb[2] == 0.f);
-    shinyGradientSample(three, 0, 0.5f, rgb);
-    CHECK(rgb[0] == 0.f && rgb[1] == 0.f && rgb[2] == 0.f);
-    shinyGradientSample(nullptr, 3, 0.5f, rgb);
-    CHECK(rgb[0] == 0.f && rgb[1] == 0.f && rgb[2] == 0.f);
+    shinyGradientSample(three, nullptr, 1, 0.7f, rgba);
+    CHECK(rgba[0] == 1.f && rgba[1] == 0.f && rgba[2] == 0.f);
+    shinyGradientSample(three, nullptr, 0, 0.5f, rgba);
+    CHECK(rgba[0] == 0.f && rgba[1] == 0.f && rgba[2] == 0.f && rgba[3] == 0.f);
+    shinyGradientSample(nullptr, nullptr, 3, 0.5f, rgba);
+    CHECK(rgba[0] == 0.f && rgba[1] == 0.f && rgba[2] == 0.f);
 
     // More stops than the shader array: the tail is ignored, so u = 1 lands
     // on stop SHINY_MAX_GRADIENT_STEPS, not the 9th.
@@ -316,8 +322,95 @@ static void checkGradient() {
         c = red;
     many[SHINY_MAX_GRADIENT_STEPS - 1] = blue;  // last usable stop
     many[SHINY_MAX_GRADIENT_STEPS]     = green; // past the cap
-    shinyGradientSample(many, SHINY_MAX_GRADIENT_STEPS + 1, 1.f, rgb);
-    CHECK(rgb[0] == 0.f && rgb[1] == 0.f && rgb[2] == 1.f);
+    shinyGradientSample(many, nullptr, SHINY_MAX_GRADIENT_STEPS + 1, 1.f, rgba);
+    CHECK(rgba[0] == 0.f && rgba[1] == 0.f && rgba[2] == 1.f);
+}
+
+static void checkGradientPositions() {
+    float pos[SHINY_MAX_GRADIENT_STEPS];
+
+    // Empty / null spec → even spacing, reported as "not custom".
+    CHECK(!shinyGradientResolvePositions("", 3, pos));
+    CHECK(pos[0] == 0.f);
+    CHECK(std::fabs(pos[1] - 0.5f) < 1e-6f);
+    CHECK(pos[2] == 1.f);
+    CHECK(!shinyGradientResolvePositions(nullptr, 3, pos));
+    CHECK(std::fabs(pos[1] - 0.5f) < 1e-6f);
+
+    // A valid spec places the stops; percentages normalize to [0, 1].
+    CHECK(shinyGradientResolvePositions("0 70 100", 3, pos));
+    CHECK(pos[0] == 0.f);
+    CHECK(std::fabs(pos[1] - 0.7f) < 1e-6f);
+    CHECK(pos[2] == 1.f);
+
+    // Commas, extra whitespace, and a '%' suffix are all accepted.
+    CHECK(shinyGradientResolvePositions(" 0%,  25.5 ,\t90% ", 3, pos));
+    CHECK(pos[0] == 0.f);
+    CHECK(std::fabs(pos[1] - 0.255f) < 1e-6f);
+    CHECK(std::fabs(pos[2] - 0.9f) < 1e-6f);
+
+    // First stop above 0 / last below 100 is allowed: the ends become
+    // constant-color bands (clamped sampling handles it).
+    CHECK(shinyGradientResolvePositions("20 80", 2, pos));
+    CHECK(std::fabs(pos[0] - 0.2f) < 1e-6f);
+    CHECK(std::fabs(pos[1] - 0.8f) < 1e-6f);
+
+    // Out-of-range values clamp into [0, 100].
+    CHECK(shinyGradientResolvePositions("-50 250", 2, pos));
+    CHECK(pos[0] == 0.f);
+    CHECK(pos[1] == 1.f);
+
+    // Decreasing sequences are repaired upward, never reordered.
+    CHECK(shinyGradientResolvePositions("0 60 40 100", 4, pos));
+    CHECK(std::fabs(pos[1] - 0.6f) < 1e-6f);
+    CHECK(std::fabs(pos[2] - 0.6f) < 1e-6f);
+    CHECK(pos[3] == 1.f);
+
+    // Count mismatch (either direction) or junk → even spacing.
+    CHECK(!shinyGradientResolvePositions("0 100", 3, pos));
+    CHECK(std::fabs(pos[1] - 0.5f) < 1e-6f);
+    CHECK(!shinyGradientResolvePositions("0 50 100", 2, pos));
+    CHECK(pos[1] == 1.f);
+    CHECK(!shinyGradientResolvePositions("0 banana 100", 3, pos));
+    CHECK(std::fabs(pos[1] - 0.5f) < 1e-6f);
+    CHECK(!shinyGradientResolvePositions("0 50x 100", 3, pos));
+    CHECK(!shinyGradientResolvePositions("0 100", 1, pos));
+    CHECK(!shinyGradientResolvePositions("0 100", 0, pos));
+
+    // Positioned sampling: with stops at 0 / 70 / 100, u = 0.7 is exactly
+    // the middle stop and u = 0.35 is halfway through the first segment.
+    const uint64_t red   = 0xffff0000ULL;
+    const uint64_t green = 0xff00ff00ULL;
+    const uint64_t blue  = 0xff0000ffULL;
+    const uint64_t rgb3[] = {red, green, blue};
+    float          custom[SHINY_MAX_GRADIENT_STEPS];
+    CHECK(shinyGradientResolvePositions("0 70 100", 3, custom));
+    float rgba[4];
+    shinyGradientSample(rgb3, custom, 3, 0.7f, rgba);
+    CHECK(std::fabs(rgba[0]) < 1e-3f && std::fabs(rgba[1] - 1.f) < 1e-3f && std::fabs(rgba[2]) < 1e-3f);
+    shinyGradientSample(rgb3, custom, 3, 0.35f, rgba);
+    CHECK(std::fabs(rgba[0] - 0.5f) < 1e-3f);
+    CHECK(std::fabs(rgba[1] - 0.5f) < 1e-3f);
+    CHECK(rgba[2] == 0.f);
+
+    // Inset endpoints: below the first stop / past the last stop the color
+    // holds constant.
+    CHECK(shinyGradientResolvePositions("40 60", 2, custom));
+    const uint64_t rb[] = {red, blue};
+    shinyGradientSample(rb, custom, 2, 0.1f, rgba);
+    CHECK(rgba[0] == 1.f && rgba[2] == 0.f);
+    shinyGradientSample(rb, custom, 2, 0.9f, rgba);
+    CHECK(rgba[0] == 0.f && rgba[2] == 1.f);
+
+    // Coincident stops are a hard step (1e-4 guard), not a NaN.
+    const uint64_t rgbr[] = {red, green, blue, red};
+    CHECK(shinyGradientResolvePositions("0 50 50 100", 4, custom));
+    shinyGradientSample(rgbr, custom, 4, 0.49f, rgba);
+    CHECK(std::isfinite(rgba[0]) && std::isfinite(rgba[1]) && std::isfinite(rgba[2]));
+    CHECK(rgba[1] > 0.9f); // just before the step: green
+    shinyGradientSample(rgbr, custom, 4, 0.51f, rgba);
+    CHECK(std::isfinite(rgba[2]));
+    CHECK(rgba[2] > 0.9f); // just after: blue heading toward red
 }
 
 static void checkEffectiveBorderSize() {
@@ -375,6 +468,7 @@ int main() {
     checkPinnedHeading();
     checkShimmer();
     checkGradient();
+    checkGradientPositions();
     checkEffectiveBorderSize();
     checkUpdateWindowActions();
 

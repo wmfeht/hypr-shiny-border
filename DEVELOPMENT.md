@@ -31,16 +31,21 @@ relative to the window.
 - optional pin (`pin` / `pin_deg`) replaces the mouse latch with a fixed
   heading; `onMouseMove` bails out early and `draw` computes the pinned angle
   live, so pulse/shimmer still animate around it
-- optional multi-step gradient: one native `CGradientValue` key; the deco
-  clamps the stop count (`shinyGradientStepCount`, cap 8) and hands the same
-  packed-ARGB stop list to both backends. The shader gets `gradColors[8]` /
-  `gradCount` — raw `glUniform*` uploads, since those names are not in
-  `CShader`'s lookup table — and ramps piecewise-linearly from the head
-  (stop 0) to the far side of the ring, keeping the classic brightness /
-  alpha shaping; `gradCount < 2` takes the untouched two-color branch.
-  The fallback builds a multi-stop `CGradientValueData` from the same list.
-  `shinyGradientSample` in `runtime.cpp` is the CPU reference for the
-  shader's chain, so the logic tests cover the interpolation.
+- optional multi-step gradient: one native `CGradientValue` key plus a
+  `gradient_positions` string; the deco clamps the stop count
+  (`shinyGradientStepCount`, cap 8), resolves per-stop positions CPU-side
+  (`shinyGradientResolvePositions` — custom "%" spec or even spacing), and
+  hands the same packed-ARGB stop list + positions to both backends. The
+  shader gets `gradColors[8]` / `gradPos[8]` / `gradCount` — raw
+  `glUniform*` uploads, since those names are not in `CShader`'s lookup
+  table — and ramps piecewise-linearly from the head (stop 0) to the far
+  side of the ring, keeping the classic brightness / alpha shaping;
+  `gradCount < 2` takes the untouched two-color branch. The fallback builds
+  a multi-stop `CGradientValueData` from the same list; custom positions
+  are baked in by resampling the ramp at 8 even points, because Hyprland's
+  border gradient only spaces stops evenly. `shinyGradientSample` in
+  `runtime.cpp` is the CPU reference for the shader's chain (including the
+  1e-4 coincident-stop guard), so the logic tests cover the interpolation.
 
 `active_only` (default on) means only the focused window tracks the cursor and
 pulses. Unfocused windows have **no** ring, but they still reserve the same

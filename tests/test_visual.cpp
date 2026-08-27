@@ -26,6 +26,7 @@ static void checkDrawAgreement() {
         .colA          = 0xFF112233ULL,
         .colB          = 0xFF445566ULL,
         .stops         = {0xFF111111ULL, 0xFF222222ULL, 0xFF333333ULL},
+        .stopPos       = {0.f, 0.7f, 1.f},
         .stopCount     = 3,
     };
 
@@ -40,13 +41,16 @@ static void checkDrawAgreement() {
         CHECK(mapped.shader.colA == mapped.fallback.shared.colA);
         CHECK(mapped.shader.colB == mapped.fallback.shared.colB);
 
-        // The gradient stop list feeds both backends unchanged: the shader
-        // uploads it as uniforms, the fallback builds CGradientValueData.
+        // The gradient stop list and positions feed both backends unchanged:
+        // the shader uploads them as uniforms, the fallback resamples them
+        // into an evenly spaced CGradientValueData.
         CHECK(mapped.shader.stopCount == p.stopCount);
         CHECK(mapped.fallback.shared.stopCount == p.stopCount);
         for (int i = 0; i < SHINY_MAX_GRADIENT_STEPS; i++) {
             CHECK(mapped.shader.stops[i] == p.stops[i]);
             CHECK(mapped.fallback.shared.stops[i] == p.stops[i]);
+            CHECK(mapped.shader.stopPos[i] == p.stopPos[i]);
+            CHECK(mapped.fallback.shared.stopPos[i] == p.stopPos[i]);
         }
 
         CHECK(mapped.shader.rounding == p.rounding);
@@ -191,11 +195,17 @@ static void checkShaderSource() {
     CHECK(frag.find("pointer_position") == std::string::npos);
     CHECK(frag.find("atan(-dir.y") == std::string::npos);
 
-    // Multi-step ramp: uniform array sized like SHINY_MAX_GRADIENT_STEPS,
-    // gated on gradCount so the classic branch survives untouched.
+    // Multi-step ramp: uniform arrays sized like SHINY_MAX_GRADIENT_STEPS,
+    // gated on gradCount so the classic branch survives untouched. Stop
+    // positions come from gradPos (not computed even spacing), with the
+    // coincident-stop guard.
     CHECK(frag.find("const int MAX_STEPS = 8;") != std::string::npos);
-    CHECK(frag.find("uniform vec4 gradColors[MAX_STEPS];") != std::string::npos);
+    CHECK(frag.find("uniform vec4  gradColors[MAX_STEPS];") != std::string::npos);
+    CHECK(frag.find("uniform float gradPos[MAX_STEPS];") != std::string::npos);
     CHECK(frag.find("gradCount >= 2") != std::string::npos);
+    CHECK(frag.find("gradPos[i - 1]") != std::string::npos);
+    CHECK(frag.find("max(t1 - t0, 1.0e-4)") != std::string::npos);
+    CHECK(frag.find("float(i - 1) / float(gradCount - 1)") == std::string::npos);
     CHECK(SHINY_MAX_GRADIENT_STEPS == 8);
 }
 
@@ -238,6 +248,14 @@ static void checkProductionWiring() {
     CHECK(pass.find("glUniform4fv") != std::string::npos);
     CHECK(pass.find("gradCount") != std::string::npos);
     CHECK(pass.find("m_data.shared.stops") != std::string::npos);
+
+    // Stop positions: one string key resolved CPU-side (even or custom),
+    // uploaded as gradPos, and baked into the fallback by resampling.
+    CHECK(plug.find("plugin:shiny-border:gradient_positions") != std::string::npos);
+    CHECK(deco.find("shinyGradientResolvePositions") != std::string::npos);
+    CHECK(deco.find("shinyGradientSample") != std::string::npos);
+    CHECK(pass.find("glUniform1fv") != std::string::npos);
+    CHECK(pass.find("m_data.shared.stopPos") != std::string::npos);
 }
 
 int main() {

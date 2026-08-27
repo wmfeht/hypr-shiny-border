@@ -37,7 +37,10 @@ Three optional looks on top of the comet:
   want steps (up to 8): the first color is the comet head, the last sits on
   the far side of the ring, mirrored on both sides of the heading. Fewer than
   two colors keeps the classic look. The gradient's own angle is ignored —
-  the heading still follows the mouse (or `pin_deg`).
+  the heading still follows the mouse (or `pin_deg`). Steps are evenly
+  spaced unless `gradient_positions` places them: one percentage of the total
+  ramp length per color (`"0 70 100"` gives the first step 70% of the ramp
+  and the second the remaining 30%).
 - **Shimmer** (`shimmer = true`): instead of breathing in place, the highlight
   wanders randomly around its heading (within `shimmer_deg`) and randomly
   resizes (within `shimmer_scale_min`..`shimmer_scale_max`). The two walks
@@ -190,6 +193,7 @@ if shinyLoaded() then
         },
         -- multi-step ramp instead of col.a/col.b (head first, up to 8):
         -- gradient = { colors = { "rgba(33ccffee)", "rgba(00ff99ee)", "rgba(ffcc33ee)" } },
+        -- gradient_positions = "0 70 100", -- % of ramp per color; empty = even spacing
       },
     },
   })
@@ -203,6 +207,14 @@ too: `plugin:shiny-border:gradient = rgba(33ccffee) rgba(00ff99ee) rgba(ffcc33ee
 Two or more colors switch the ring to the multi-step ramp; one (the default)
 keeps `col.a`/`col.b`; anything past 8 colors is ignored. The gradient's
 angle field is accepted but unused — the comet aims itself.
+
+`gradient_positions` sizes the steps: one value per gradient color, percent
+of the total ramp length, `0` = head, `100` = far side. Space or comma
+separated, `%` suffix optional. Stops may not go backwards (a decreasing
+value is bumped up to its predecessor); a first stop above `0` or a last
+below `100` leaves constant-color bands at the ends. An empty string (the
+default), a count that does not match the color count, or an unparsable
+token falls back to even spacing.
 
 | Key | Default | |
 |---|---|---|
@@ -224,6 +236,7 @@ angle field is accepted but unused — the comet aims itself.
 | `col.a` | `rgba(33ccffee)` | comet head |
 | `col.b` | `rgba(00ff99ee)` | comet shoulder |
 | `gradient` | 1 color (off) | multi-step ramp, head first; 2–8 colors replace `col.a`/`col.b`; angle ignored |
+| `gradient_positions` | `""` (even) | ramp position per gradient color, % of total length (`"0 70 100"`); empty / mismatch = even spacing |
 
 ## License
 
