@@ -72,10 +72,32 @@ struct ShinyUpdateActions {
 ShinyUpdateActions shinyUpdateWindowActions(const ShinyGeoLatch& now, int effectiveBorder, const ShinyGeoLatch& last,
                                             int lastEffectiveBorder);
 
+// Multi-step gradient: hard cap on configurable stops. Mirrors the shader's
+// gradColors[SHINY_MAX_GRADIENT_STEPS] uniform array — keep them in sync.
+inline constexpr int SHINY_MAX_GRADIENT_STEPS = 8;
+
+// plugin:shiny-border:gradient_steps → effective stop count. A gradient
+// needs at least two stops, so 0 and 1 mean "off" (classic col.a/col.b);
+// anything past the uniform array is clamped to SHINY_MAX_GRADIENT_STEPS.
+int shinyGradientStepCount(int configured);
+
+// Normalized ramp position of stop i among count stops: 0 at the comet
+// head, 1 at the far side. count < 2 or a lone stop pins to 0.
+float shinyGradientStopPos(int i, int count);
+
+// CPU reference for the shader's piecewise-linear chain: sample the ramp
+// at u ∈ [0, 1] into rgb[3] (0..1 floats). Stops are packed ARGB uint64
+// like ShinyDrawShared colors; stop alpha is ignored — the shader shapes
+// alpha from coverage, exactly like the classic two-color path.
+// count < 2 samples stop 0 (or black when count <= 0).
+void shinyGradientSample(const uint64_t* stops, int count, float u, float rgb[3]);
+
 // Shared draw fields both backends consume. Colors are packed Hyprland
 // CHyprColor uint64 (same as sc<uint64_t>(g_cfg.colA->value())).
 // borderSize is logical (unscaled) px — SHADER_THICK / CBorderPassElement
 // GL scale once. Do not store already-scaled px here.
+// stopCount 0 = classic col.a/col.b comet; 2..SHINY_MAX_GRADIENT_STEPS =
+// multi-step ramp through stops[0..stopCount-1] (head → far side).
 struct ShinyDrawShared {
     int      rounding      = 0;
     int      outerRound    = 0;
@@ -84,6 +106,8 @@ struct ShinyDrawShared {
     int      borderSize    = 3; // logical (unscaled) px. Scale once (phase 4).
     uint64_t colA          = 0;
     uint64_t colB          = 0;
+    uint64_t stops[SHINY_MAX_GRADIENT_STEPS] = {};
+    int      stopCount     = 0;
 };
 
 // Fallback-only: inner-box expand/inset px = round(logical × monitor scale).

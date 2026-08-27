@@ -30,8 +30,14 @@ color and the highlight lags the mouse.
 pulses. `enabled = false` reserves 0 px, so turning the plugin off does not
 leave a gap.
 
-Two optional looks on top of the comet:
+Three optional looks on top of the comet:
 
+- **Gradient** (`gradient = { colors = { … } }`): replace the two-color
+  `col.a`/`col.b` ramp with a multi-step gradient. List as many colors as you
+  want steps (up to 8): the first color is the comet head, the last sits on
+  the far side of the ring, mirrored on both sides of the heading. Fewer than
+  two colors keeps the classic look. The gradient's own angle is ignored —
+  the heading still follows the mouse (or `pin_deg`).
 - **Shimmer** (`shimmer = true`): instead of breathing in place, the highlight
   wanders randomly around its heading (within `shimmer_deg`) and randomly
   resizes (within `shimmer_scale_min`..`shimmer_scale_max`). The two walks
@@ -182,6 +188,8 @@ if shinyLoaded() then
           a = "rgba(33ccffee)", -- highlight head
           b = "rgba(00ff99ee)", -- shoulder
         },
+        -- multi-step ramp instead of col.a/col.b (head first, up to 8):
+        -- gradient = { colors = { "rgba(33ccffee)", "rgba(00ff99ee)", "rgba(ffcc33ee)" } },
       },
     },
   })
@@ -189,6 +197,12 @@ end
 ```
 
 `col.a` / `col.b` are ARGB. Defaults match Omarchy’s active gradient.
+
+`gradient` is a stock Hyprland gradient value, so classic config syntax works
+too: `plugin:shiny-border:gradient = rgba(33ccffee) rgba(00ff99ee) rgba(ffcc33ee)`.
+Two or more colors switch the ring to the multi-step ramp; one (the default)
+keeps `col.a`/`col.b`; anything past 8 colors is ignored. The gradient's
+angle field is accepted but unused — the comet aims itself.
 
 | Key | Default | |
 |---|---|---|
@@ -209,6 +223,7 @@ end
 | `border_size` | `3` | px; `-1` follows `general:border_size`. 1px is the intended sheen |
 | `col.a` | `rgba(33ccffee)` | comet head |
 | `col.b` | `rgba(00ff99ee)` | comet shoulder |
+| `gradient` | 1 color (off) | multi-step ramp, head first; 2–8 colors replace `col.a`/`col.b`; angle ignored |
 
 ## License
 

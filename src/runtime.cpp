@@ -69,6 +69,49 @@ ShinyUpdateActions shinyUpdateWindowActions(const ShinyGeoLatch& now, int effect
     };
 }
 
+int shinyGradientStepCount(int configured) {
+    if (configured < 2)
+        return 0;
+    return std::min(configured, SHINY_MAX_GRADIENT_STEPS);
+}
+
+float shinyGradientStopPos(int i, int count) {
+    if (count < 2)
+        return 0.f;
+    const int clamped = std::clamp(i, 0, count - 1);
+    return static_cast<float>(clamped) / static_cast<float>(count - 1);
+}
+
+static void shinyUnpackArgb(uint64_t argb, float rgb[3]) {
+    rgb[0] = static_cast<float>((argb >> 16) & 0xFF) / 255.f;
+    rgb[1] = static_cast<float>((argb >> 8) & 0xFF) / 255.f;
+    rgb[2] = static_cast<float>(argb & 0xFF) / 255.f;
+}
+
+void shinyGradientSample(const uint64_t* stops, int count, float u, float rgb[3]) {
+    rgb[0] = rgb[1] = rgb[2] = 0.f;
+    if (!stops || count <= 0)
+        return;
+
+    shinyUnpackArgb(stops[0], rgb);
+    if (count < 2)
+        return;
+
+    // Same chained-mix form as the shader: each segment linearly replaces
+    // the accumulated color, so stop i sits exactly at shinyGradientStopPos.
+    const int n = std::min(count, SHINY_MAX_GRADIENT_STEPS);
+    const float pos = std::clamp(u, 0.f, 1.f);
+    for (int i = 1; i < n; i++) {
+        const float t0 = shinyGradientStopPos(i - 1, n);
+        const float t1 = shinyGradientStopPos(i, n);
+        const float w  = std::clamp((pos - t0) / (t1 - t0), 0.f, 1.f);
+        float       next[3];
+        shinyUnpackArgb(stops[i], next);
+        for (int c = 0; c < 3; c++)
+            rgb[c] = rgb[c] + (next[c] - rgb[c]) * w;
+    }
+}
+
 int shinyFallbackExpandPx(int logicalPx, float monitorScale) {
     return static_cast<int>(std::round(static_cast<float>(logicalPx) * monitorScale));
 }

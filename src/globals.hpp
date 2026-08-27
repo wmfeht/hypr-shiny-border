@@ -27,6 +27,11 @@ struct SShinyConfig {
     SP<Config::Values::CFloatValue> lobe;
     SP<Config::Values::CColorValue> colA;
     SP<Config::Values::CColorValue> colB;
+    // Optional multi-step ramp. Fewer than two colors (the single-color
+    // default) keeps the classic col.a/col.b comet; two or more colors
+    // replace it, first color at the head. The gradient's own angle is
+    // ignored — the heading comes from the mouse / pin.
+    SP<Config::Values::CGradientValue> gradient;
     // Pointer into Hyprland's CConfigValueBase::registry(). Bound in
     // PLUGIN_INIT, reset in PLUGIN_EXIT — must not be a function-local static
     // (that destructor runs during dlclose; flushCaches() can UAF).

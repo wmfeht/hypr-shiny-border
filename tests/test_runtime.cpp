@@ -244,6 +244,82 @@ static void checkShimmer() {
     CHECK(shinyShimmerThickScale(0.f) > 0.f);
 }
 
+static void checkGradient() {
+    // A ramp needs two stops: 0 / 1 (and nonsense negatives) are "off".
+    CHECK(shinyGradientStepCount(-3) == 0);
+    CHECK(shinyGradientStepCount(0) == 0);
+    CHECK(shinyGradientStepCount(1) == 0);
+    CHECK(shinyGradientStepCount(2) == 2);
+    CHECK(shinyGradientStepCount(SHINY_MAX_GRADIENT_STEPS) == SHINY_MAX_GRADIENT_STEPS);
+
+    // Past the shader's uniform array → clamp, not wrap or UB.
+    CHECK(shinyGradientStepCount(SHINY_MAX_GRADIENT_STEPS + 1) == SHINY_MAX_GRADIENT_STEPS);
+    CHECK(shinyGradientStepCount(100) == SHINY_MAX_GRADIENT_STEPS);
+
+    // Stop positions: endpoints pin to 0 / 1, interior stops are evenly spaced.
+    CHECK(shinyGradientStopPos(0, 2) == 0.f);
+    CHECK(shinyGradientStopPos(1, 2) == 1.f);
+    CHECK(std::fabs(shinyGradientStopPos(1, 3) - 0.5f) < 1e-6f);
+    CHECK(std::fabs(shinyGradientStopPos(2, 5) - 0.5f) < 1e-6f);
+    CHECK(shinyGradientStopPos(0, 1) == 0.f); // lone stop / off → head
+    CHECK(shinyGradientStopPos(3, 0) == 0.f);
+    CHECK(shinyGradientStopPos(-1, 4) == 0.f);  // out-of-range i clamps
+    CHECK(shinyGradientStopPos(99, 4) == 1.f);
+
+    const uint64_t red   = 0xffff0000ULL;
+    const uint64_t green = 0xff00ff00ULL;
+    const uint64_t blue  = 0xff0000ffULL;
+
+    // Two stops: endpoints are exact, the middle is the linear mix.
+    const uint64_t two[] = {red, blue};
+    float          rgb[3];
+    shinyGradientSample(two, 2, 0.f, rgb);
+    CHECK(rgb[0] == 1.f && rgb[1] == 0.f && rgb[2] == 0.f);
+    shinyGradientSample(two, 2, 1.f, rgb);
+    CHECK(rgb[0] == 0.f && rgb[1] == 0.f && rgb[2] == 1.f);
+    shinyGradientSample(two, 2, 0.5f, rgb);
+    CHECK(std::fabs(rgb[0] - 0.5f) < 1e-6f);
+    CHECK(rgb[1] == 0.f);
+    CHECK(std::fabs(rgb[2] - 0.5f) < 1e-6f);
+
+    // u outside [0, 1] clamps to the endpoints (d0*2 never exceeds 1, but
+    // the sampler is the reference for the shader's clamp).
+    shinyGradientSample(two, 2, -1.f, rgb);
+    CHECK(rgb[0] == 1.f && rgb[2] == 0.f);
+    shinyGradientSample(two, 2, 2.f, rgb);
+    CHECK(rgb[0] == 0.f && rgb[2] == 1.f);
+
+    // Three stops: the middle stop sits exactly at u = 0.5, and the first
+    // segment interpolates independently of the stops after it.
+    const uint64_t three[] = {red, green, blue};
+    shinyGradientSample(three, 3, 0.5f, rgb);
+    CHECK(rgb[0] == 0.f && rgb[1] == 1.f && rgb[2] == 0.f);
+    shinyGradientSample(three, 3, 0.25f, rgb);
+    CHECK(std::fabs(rgb[0] - 0.5f) < 1e-6f);
+    CHECK(std::fabs(rgb[1] - 0.5f) < 1e-6f);
+    CHECK(rgb[2] == 0.f);
+    shinyGradientSample(three, 3, 1.f, rgb);
+    CHECK(rgb[0] == 0.f && rgb[1] == 0.f && rgb[2] == 1.f);
+
+    // Degenerate inputs: lone stop samples that stop, empty samples black.
+    shinyGradientSample(three, 1, 0.7f, rgb);
+    CHECK(rgb[0] == 1.f && rgb[1] == 0.f && rgb[2] == 0.f);
+    shinyGradientSample(three, 0, 0.5f, rgb);
+    CHECK(rgb[0] == 0.f && rgb[1] == 0.f && rgb[2] == 0.f);
+    shinyGradientSample(nullptr, 3, 0.5f, rgb);
+    CHECK(rgb[0] == 0.f && rgb[1] == 0.f && rgb[2] == 0.f);
+
+    // More stops than the shader array: the tail is ignored, so u = 1 lands
+    // on stop SHINY_MAX_GRADIENT_STEPS, not the 9th.
+    uint64_t many[SHINY_MAX_GRADIENT_STEPS + 1];
+    for (auto& c : many)
+        c = red;
+    many[SHINY_MAX_GRADIENT_STEPS - 1] = blue;  // last usable stop
+    many[SHINY_MAX_GRADIENT_STEPS]     = green; // past the cap
+    shinyGradientSample(many, SHINY_MAX_GRADIENT_STEPS + 1, 1.f, rgb);
+    CHECK(rgb[0] == 0.f && rgb[1] == 0.f && rgb[2] == 1.f);
+}
+
 static void checkEffectiveBorderSize() {
     CHECK(shinyEffectiveBorderSize(3, false) == 0);
     CHECK(shinyEffectiveBorderSize(3, true) == 3);
@@ -298,6 +374,7 @@ int main() {
     checkEffectExclusivity();
     checkPinnedHeading();
     checkShimmer();
+    checkGradient();
     checkEffectiveBorderSize();
     checkUpdateWindowActions();
 

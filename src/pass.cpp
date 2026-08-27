@@ -13,9 +13,17 @@
 
 #include <GLES3/gl32.h>
 
+#include <algorithm>
+
 using namespace Render::GL;
 
 static SP<CShader> g_shinyShader;
+
+// gradColors / gradCount are not in CShader's uniform lookup table, so they
+// are uploaded with raw glUniform* against cached locations. -1 is a valid
+// "absent" location: glUniform* silently ignores it.
+static GLint g_gradColorsLoc = -1;
+static GLint g_gradCountLoc  = -1;
 
 static bool hyprGlAlive() {
     return static_cast<bool>(g_pHyprOpenGL);
@@ -41,16 +49,23 @@ static bool hyprCompileShader() {
         return false;
     }
 
+    g_gradColorsLoc = glGetUniformLocation(g_shinyShader->program(), "gradColors");
+    g_gradCountLoc  = glGetUniformLocation(g_shinyShader->program(), "gradCount");
+
     return true;
 }
 
 static void hyprResetShader() {
     g_shinyShader.reset();
+    g_gradColorsLoc = -1;
+    g_gradCountLoc  = -1;
 }
 
 static void hyprAbandonShader() {
     // Deliberate leak: empty the static without ~CShader / glDelete*.
     (void)new SP<CShader>(std::move(g_shinyShader));
+    g_gradColorsLoc = -1;
+    g_gradCountLoc  = -1;
 }
 
 [[gnu::constructor]] static void bindShinyShaderOps() {
@@ -130,6 +145,20 @@ std::vector<UP<IPassElement>> CShinyPassElement::draw() {
     shader->setUniformFloat(SHADER_RANGE, m_data.lobe);
     shader->setUniformFloat(SHADER_BRIGHTNESS, m_data.pulseHz);
     shader->setUniformFloat(SHADER_ANGLE, m_data.angle);
+
+    // Always upload the count — uniforms persist per program, so a classic
+    // draw must clear a previous gradient draw's count back to 0.
+    const int steps = std::clamp(m_data.shared.stopCount, 0, SHINY_MAX_GRADIENT_STEPS);
+    GLfloat   gradVals[SHINY_MAX_GRADIENT_STEPS * 4] = {};
+    for (int i = 0; i < steps; i++) {
+        const CHyprColor stop{m_data.shared.stops[i]};
+        gradVals[i * 4 + 0] = sc<float>(stop.r);
+        gradVals[i * 4 + 1] = sc<float>(stop.g);
+        gradVals[i * 4 + 2] = sc<float>(stop.b);
+        gradVals[i * 4 + 3] = sc<float>(stop.a);
+    }
+    glUniform4fv(g_gradColorsLoc, SHINY_MAX_GRADIENT_STEPS, gradVals);
+    glUniform1i(g_gradCountLoc, steps);
 
     const GLint vao = shader->getUniformLocation(SHADER_SHADER_VAO);
     if (!shinyCanBindVao(vao))

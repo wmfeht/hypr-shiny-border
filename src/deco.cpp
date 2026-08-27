@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <vector>
 
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/desktop/Workspace.hpp>
@@ -220,7 +221,7 @@ void CShinyBorder::draw(PHLMONITOR pMonitor, float const& a) {
     if (outerBox.width < 1 || outerBox.height < 1)
         return;
 
-    const ShinyDrawShared shared{
+    ShinyDrawShared shared{
         .rounding      = sc<int>(PWINDOW->rounding() * pMonitor->m_scale),
         .outerRound    = sc<int>((PWINDOW->rounding() + BORDERSIZE) * pMonitor->m_scale),
         .roundingPower = PWINDOW->roundingPower(),
@@ -229,6 +230,12 @@ void CShinyBorder::draw(PHLMONITOR pMonitor, float const& a) {
         .colA          = sc<uint64_t>(g_cfg.colA->value()),
         .colB          = sc<uint64_t>(g_cfg.colB->value()),
     };
+    // Multi-step ramp is opt-in: the single-color default (and any lone
+    // color) keeps stopCount at 0 → the classic col.a/col.b comet.
+    const auto& gradientCfg = g_cfg.gradient->value();
+    shared.stopCount        = shinyGradientStepCount(sc<int>(gradientCfg.m_colors.size()));
+    for (int i = 0; i < shared.stopCount; i++)
+        shared.stops[i] = sc<uint64_t>(gradientCfg.m_colors[sc<size_t>(i)].getAsHex());
     const auto mapped = shinyMapDrawBackends(shared, pMonitor->m_scale);
 
     // Pin replaces the mouse latch entirely; angle_offset still applies.
@@ -265,8 +272,18 @@ void CShinyBorder::draw(PHLMONITOR pMonitor, float const& a) {
     }
 
     CBox windowBox = outerBox.copy().expand(-mapped.fallback.expandPx).round();
-    Config::CGradientValueData grad(
-        {CHyprColor{mapped.fallback.shared.colA}, CHyprColor{mapped.fallback.shared.colB}}, drawAngle);
+
+    // Same stop list as the shader: the ramp when configured, col.a/col.b
+    // otherwise. CBorderPassElement interpolates multi-stop natively.
+    std::vector<CHyprColor> stops;
+    if (mapped.fallback.shared.stopCount >= 2) {
+        stops.reserve(sc<size_t>(mapped.fallback.shared.stopCount));
+        for (int i = 0; i < mapped.fallback.shared.stopCount; i++)
+            stops.emplace_back(mapped.fallback.shared.stops[i]);
+    } else {
+        stops = {CHyprColor{mapped.fallback.shared.colA}, CHyprColor{mapped.fallback.shared.colB}};
+    }
+    Config::CGradientValueData grad(std::move(stops), drawAngle);
 
     CBorderPassElement::SBorderData data;
     data.box           = windowBox;

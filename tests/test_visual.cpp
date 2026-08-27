@@ -25,6 +25,8 @@ static void checkDrawAgreement() {
         .borderSize    = 3,
         .colA          = 0xFF112233ULL,
         .colB          = 0xFF445566ULL,
+        .stops         = {0xFF111111ULL, 0xFF222222ULL, 0xFF333333ULL},
+        .stopCount     = 3,
     };
 
     const float scales[] = {1.f, 2.f};
@@ -37,6 +39,15 @@ static void checkDrawAgreement() {
         CHECK(mapped.shader.a == mapped.fallback.shared.a);
         CHECK(mapped.shader.colA == mapped.fallback.shared.colA);
         CHECK(mapped.shader.colB == mapped.fallback.shared.colB);
+
+        // The gradient stop list feeds both backends unchanged: the shader
+        // uploads it as uniforms, the fallback builds CGradientValueData.
+        CHECK(mapped.shader.stopCount == p.stopCount);
+        CHECK(mapped.fallback.shared.stopCount == p.stopCount);
+        for (int i = 0; i < SHINY_MAX_GRADIENT_STEPS; i++) {
+            CHECK(mapped.shader.stops[i] == p.stops[i]);
+            CHECK(mapped.fallback.shared.stops[i] == p.stops[i]);
+        }
 
         CHECK(mapped.shader.rounding == p.rounding);
         CHECK(mapped.shader.outerRound == p.outerRound);
@@ -179,6 +190,13 @@ static void checkShaderSource() {
     CHECK(frag.find("brightness <= 0.0") != std::string::npos);
     CHECK(frag.find("pointer_position") == std::string::npos);
     CHECK(frag.find("atan(-dir.y") == std::string::npos);
+
+    // Multi-step ramp: uniform array sized like SHINY_MAX_GRADIENT_STEPS,
+    // gated on gradCount so the classic branch survives untouched.
+    CHECK(frag.find("const int MAX_STEPS = 8;") != std::string::npos);
+    CHECK(frag.find("uniform vec4 gradColors[MAX_STEPS];") != std::string::npos);
+    CHECK(frag.find("gradCount >= 2") != std::string::npos);
+    CHECK(SHINY_MAX_GRADIENT_STEPS == 8);
 }
 
 static void checkProductionWiring() {
@@ -210,6 +228,16 @@ static void checkProductionWiring() {
     // the mouse-move listener bails out before touching any latch.
     CHECK(deco.find("shinyPinnedHeading") != std::string::npos);
     CHECK(plug.find("g_cfg.pin->value()") != std::string::npos);
+
+    // Gradient is one native gradient key, clamped through the shared count
+    // helper, and the fallback consumes the same stop list as the shader.
+    CHECK(plug.find("plugin:shiny-border:gradient") != std::string::npos);
+    CHECK(plug.find("CGradientValue") != std::string::npos);
+    CHECK(deco.find("shinyGradientStepCount") != std::string::npos);
+    CHECK(deco.find("g_cfg.gradient->value()") != std::string::npos);
+    CHECK(pass.find("glUniform4fv") != std::string::npos);
+    CHECK(pass.find("gradCount") != std::string::npos);
+    CHECK(pass.find("m_data.shared.stops") != std::string::npos);
 }
 
 int main() {

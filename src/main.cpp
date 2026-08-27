@@ -120,6 +120,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                                                                 Config::Values::SFloatValueOptions{.min = 0.04, .max = 0.5});
     g_cfg.colA         = makeShared<Config::Values::CColorValue>("plugin:shiny-border:col.a", "Highlight head (ARGB)", 0xee33ccff);
     g_cfg.colB         = makeShared<Config::Values::CColorValue>("plugin:shiny-border:col.b", "Highlight shoulder (ARGB)", 0xee00ff99);
+    // Single-color default = off (a ramp needs two stops). The gradient's own
+    // angle is ignored: the comet heading comes from the mouse / pin.
+    g_cfg.gradient     = makeShared<Config::Values::CGradientValue>("plugin:shiny-border:gradient",
+                                                                    "Multi-step comet ramp, head first; fewer than two colors keeps col.a/col.b; angle is ignored",
+                                                                    CHyprColor{0xee33ccff});
 
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.enabled);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.activeOnly);
@@ -138,6 +143,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.lobe);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.colA);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.colB);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.gradient);
 
     HyprlandAPI::reloadConfig();
 
