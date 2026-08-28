@@ -40,7 +40,9 @@ Three optional looks on top of the comet:
   the heading still follows the mouse (or `pin_deg`). Steps are evenly
   spaced unless `gradient_positions` places them: one percentage of the total
   ramp length per color (`"0 70 100"` gives the first step 70% of the ramp
-  and the second the remaining 30%).
+  and the second the remaining 30%). By default both halves of the ring
+  mirror each other; `gradient_cw` / `gradient_positions_cw` give the
+  clockwise half its own colors and/or step lengths.
 - **Shimmer** (`shimmer = true`): instead of breathing in place, the highlight
   wanders randomly around its heading (within `shimmer_deg`) and randomly
   resizes (within `shimmer_scale_min`..`shimmer_scale_max`). The two walks
@@ -194,6 +196,10 @@ if shinyLoaded() then
         -- multi-step ramp instead of col.a/col.b (head first, up to 8):
         -- gradient = { colors = { "rgba(33ccffee)", "rgba(00ff99ee)", "rgba(ffcc33ee)" } },
         -- gradient_positions = "0 70 100", -- % of ramp per color; empty = even spacing
+        -- clockwise half override (defaults mirror the keys above);
+        -- match the first/last colors with gradient's or the ring seams:
+        -- gradient_cw = { colors = { "rgba(33ccffee)", "rgba(ff3399ee)", "rgba(ffcc33ee)" } },
+        -- gradient_positions_cw = "0 30 100",
       },
     },
   })
@@ -216,6 +222,21 @@ below `100` leaves constant-color bands at the ends. An empty string (the
 default), a count that does not match the color count, or an unparsable
 token falls back to even spacing.
 
+The ramp is mirrored on both sides of the heading unless you override the
+**clockwise half** (looking at the screen, the half you sweep going
+clockwise from the comet head). `gradient_cw` gives that half its own
+colors — the count may differ from `gradient`'s — and
+`gradient_positions_cw` its own step lengths (one percentage per clockwise
+color). `gradient_positions_cw` also works on its own: same colors,
+different pacing per side. Left unset, each key mirrors the primary one;
+with own colors set, an empty `gradient_positions_cw` means even spacing.
+The clockwise keys only apply while `gradient` is active.
+
+The two halves always meet at the comet head (first stop) and the far side
+(last stop). Nothing enforces that `gradient_cw`'s first and last colors
+match `gradient`'s — if they differ, the ring shows a visible seam at the
+head and/or the far side. Match the endpoint colors unless you want that.
+
 | Key | Default | |
 |---|---|---|
 | `enabled` | `true` | master switch; `false` reserves 0 px (no gap) |
@@ -237,6 +258,8 @@ token falls back to even spacing.
 | `col.b` | `rgba(00ff99ee)` | comet shoulder |
 | `gradient` | 1 color (off) | multi-step ramp, head first; 2–8 colors replace `col.a`/`col.b`; angle ignored |
 | `gradient_positions` | `""` (even) | ramp position per gradient color, % of total length (`"0 70 100"`); empty / mismatch = even spacing |
+| `gradient_cw` | 1 color (mirror) | clockwise-half colors; 2–8 colors replace `gradient`'s on that half; match first/last with `gradient` to avoid seams |
+| `gradient_positions_cw` | `""` (mirror) | clockwise-half ramp positions, % of total length; empty = mirror `gradient_positions` (or even spacing with own colors) |
 
 ## License
 

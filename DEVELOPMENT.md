@@ -46,6 +46,19 @@ relative to the window.
   border gradient only spaces stops evenly. `shinyGradientSample` in
   `runtime.cpp` is the CPU reference for the shader's chain (including the
   1e-4 coincident-stop guard), so the logic tests cover the interpolation.
+- per-side gradient: `gradient_cw` / `gradient_positions_cw` override the
+  clockwise half (the shader's `t > 0.5` — `t` is the CCW sweep from the
+  heading, `d0 = min(t, 1 - t)` still folds each half into head → far
+  side). `shinyGradientResolveCwSide` resolves the half CPU-side: own
+  colors → own positions (empty spec = even); inherited colors → the spec
+  alone can reshape, empty spec = exact mirror; primary ramp off = cw off.
+  The result rides in `stopsCW` / `stopPosCW` / `stopCountCW` and a second
+  uniform trio (`gradColorsCW` / `gradPosCW` / `gradCountCW`); the shared
+  `shinyRampColor(bool cw, float u)` GLSL function picks the set per
+  fragment. Endpoint-color equivalence between the halves is deliberately
+  not enforced — mismatched first/last colors seam at the head / far side
+  (documented in the README). The fallback linear gradient cannot express
+  asymmetry and keeps drawing the primary side.
 
 `active_only` (default on) means only the focused window tracks the cursor and
 pulses. Unfocused windows have **no** ring, but they still reserve the same

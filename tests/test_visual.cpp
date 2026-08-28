@@ -28,6 +28,9 @@ static void checkDrawAgreement() {
         .stops         = {0xFF111111ULL, 0xFF222222ULL, 0xFF333333ULL},
         .stopPos       = {0.f, 0.7f, 1.f},
         .stopCount     = 3,
+        .stopsCW       = {0xFF444444ULL, 0xFF555555ULL},
+        .stopPosCW     = {0.f, 1.f},
+        .stopCountCW   = 2,
     };
 
     const float scales[] = {1.f, 2.f};
@@ -46,11 +49,14 @@ static void checkDrawAgreement() {
         // into an evenly spaced CGradientValueData.
         CHECK(mapped.shader.stopCount == p.stopCount);
         CHECK(mapped.fallback.shared.stopCount == p.stopCount);
+        CHECK(mapped.shader.stopCountCW == p.stopCountCW);
         for (int i = 0; i < SHINY_MAX_GRADIENT_STEPS; i++) {
             CHECK(mapped.shader.stops[i] == p.stops[i]);
             CHECK(mapped.fallback.shared.stops[i] == p.stops[i]);
             CHECK(mapped.shader.stopPos[i] == p.stopPos[i]);
             CHECK(mapped.fallback.shared.stopPos[i] == p.stopPos[i]);
+            CHECK(mapped.shader.stopsCW[i] == p.stopsCW[i]);
+            CHECK(mapped.shader.stopPosCW[i] == p.stopPosCW[i]);
         }
 
         CHECK(mapped.shader.rounding == p.rounding);
@@ -207,6 +213,13 @@ static void checkShaderSource() {
     CHECK(frag.find("max(t1 - t0, 1.0e-4)") != std::string::npos);
     CHECK(frag.find("float(i - 1) / float(gradCount - 1)") == std::string::npos);
     CHECK(SHINY_MAX_GRADIENT_STEPS == 8);
+
+    // Per-side ramp: a CW uniform set and one shared chain selected by
+    // which half of the ring the fragment is on (t > 0.5 = clockwise).
+    CHECK(frag.find("uniform vec4  gradColorsCW[MAX_STEPS];") != std::string::npos);
+    CHECK(frag.find("uniform float gradPosCW[MAX_STEPS];") != std::string::npos);
+    CHECK(frag.find("uniform int   gradCountCW;") != std::string::npos);
+    CHECK(frag.find("shinyRampColor(t > 0.5, u)") != std::string::npos);
 }
 
 static void checkProductionWiring() {
@@ -256,6 +269,15 @@ static void checkProductionWiring() {
     CHECK(deco.find("shinyGradientSample") != std::string::npos);
     CHECK(pass.find("glUniform1fv") != std::string::npos);
     CHECK(pass.find("m_data.shared.stopPos") != std::string::npos);
+
+    // Clockwise half: resolved through the shared helper in the deco and
+    // uploaded as its own uniform trio. The fallback linear gradient
+    // cannot represent asymmetry and stays primary-side.
+    CHECK(plug.find("plugin:shiny-border:gradient_cw") != std::string::npos);
+    CHECK(plug.find("plugin:shiny-border:gradient_positions_cw") != std::string::npos);
+    CHECK(deco.find("shinyGradientResolveCwSide") != std::string::npos);
+    CHECK(pass.find("gradColorsCW") != std::string::npos);
+    CHECK(pass.find("m_data.shared.stopsCW") != std::string::npos);
 }
 
 int main() {

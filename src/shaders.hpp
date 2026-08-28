@@ -45,17 +45,40 @@ uniform float range;             // angular half-width as fraction of the circle
 uniform float brightness;        // pulse Hz; <= 0 is the nominal ring
 uniform float angle;             // latched heading, radians, already quantized + offset
 
-// Multi-step ramp (plugin:shiny-border:gradient / gradient_positions).
+// Multi-step ramp (plugin:shiny-border:gradient / gradient_positions,
+// plus the gradient_cw / gradient_positions_cw clockwise-half override).
 // Not in CShader's uniform table — pass.cpp uploads these with raw
-// glUniform* calls. gradPos is normalized, non-decreasing (deco resolves
-// even spacing or the custom spec CPU-side).
+// glUniform* calls. Positions are normalized, non-decreasing (deco
+// resolves even spacing or the custom spec CPU-side). The CW set is a
+// mirror of the primary set unless overridden; whenever gradCount >= 2
+// the deco guarantees gradCountCW >= 2 too.
 const int MAX_STEPS = 8;
 uniform vec4  gradColors[MAX_STEPS];
 uniform float gradPos[MAX_STEPS];
 uniform int   gradCount;         // < 2 keeps the classic color / colorSRGB comet
+uniform vec4  gradColorsCW[MAX_STEPS];
+uniform float gradPosCW[MAX_STEPS];
+uniform int   gradCountCW;
 
 const float TAU = 6.28318530718;
 const float AA  = 1.25;
+
+// Piecewise-linear chain over one half of the ring: u 0 at the comet head,
+// 1 at the far side. The 1e-4 guard turns coincident stops into a hard
+// step instead of a divide by zero.
+vec3 shinyRampColor(bool cw, float u) {
+    vec3 g = cw ? gradColorsCW[0].rgb : gradColors[0].rgb;
+    int  n = cw ? gradCountCW : gradCount;
+    for (int i = 1; i < MAX_STEPS; i++) {
+        if (i >= n)
+            break;
+        float t0 = cw ? gradPosCW[i - 1] : gradPos[i - 1];
+        float t1 = cw ? gradPosCW[i] : gradPos[i];
+        vec3  c  = cw ? gradColorsCW[i].rgb : gradColors[i].rgb;
+        g = mix(g, c, clamp((u - t0) / max(t1 - t0, 1.0e-4), 0.0, 1.0));
+    }
+    return g;
+}
 
 float sdRoundBox(vec2 p, vec2 b, float r, float power) {
     vec2 q = abs(p) - b + vec2(r);
@@ -120,21 +143,15 @@ void main() {
     float hot = pow(cone, 2.6);
     vec3  rgb;
     if (gradCount >= 2) {
-        // Piecewise-linear ramp: stop 0 at the head, the last stop at the
-        // far side of the ring, mirrored on both sides of the heading.
-        // Stop positions come from gradPos; the 1e-4 guard turns
-        // coincident stops into a hard step instead of a divide by zero.
-        // Same brightness profile as the classic branch (bright head,
-        // 0.22-dim tail) so the comet shape reads identically.
+        // Ramp: stop 0 at the head, the last stop at the far side. t is the
+        // CCW sweep from the head, so t > 0.5 is the half reached sooner
+        // going clockwise — that half may carry its own colors/positions.
+        // Each half still runs head → far side, so the geometry itself is
+        // seamless; only mismatched endpoint colors between the halves
+        // can show a seam. Same brightness profile as the classic branch
+        // (bright head, 0.22-dim tail) so the comet shape reads identically.
         float u = clamp(d0 * 2.0, 0.0, 1.0);
-        vec3  g = gradColors[0].rgb;
-        for (int i = 1; i < MAX_STEPS; i++) {
-            if (i >= gradCount)
-                break;
-            float t0 = gradPos[i - 1];
-            float t1 = gradPos[i];
-            g = mix(g, gradColors[i].rgb, clamp((u - t0) / max(t1 - t0, 1.0e-4), 0.0, 1.0));
-        }
+        vec3  g = shinyRampColor(t > 0.5, u);
         rgb = mix(g * mix(0.22, 1.0, pow(cone, 0.9)), vec3(1.0), hot * 0.95);
     } else {
         vec3 dim = colorSRGB.rgb * 0.22;

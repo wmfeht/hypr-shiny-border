@@ -128,6 +128,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_cfg.gradientPositions = makeShared<Config::Values::CStringValue>("plugin:shiny-border:gradient_positions",
                                                                        "Ramp position per gradient color, percent of the total length (\"0 70 100\"); empty = even spacing",
                                                                        "");
+    g_cfg.gradientCw        = makeShared<Config::Values::CGradientValue>("plugin:shiny-border:gradient_cw",
+                                                                         "Clockwise-half colors; fewer than two mirrors gradient; match first/last colors to avoid seams",
+                                                                         CHyprColor{0xee33ccff});
+    g_cfg.gradientPositionsCw = makeShared<Config::Values::CStringValue>("plugin:shiny-border:gradient_positions_cw",
+                                                                         "Clockwise-half ramp positions, percent (\"0 30 100\"); empty = mirror / even spacing",
+                                                                         "");
 
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.enabled);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.activeOnly);
@@ -148,6 +154,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.colB);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.gradient);
     HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.gradientPositions);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.gradientCw);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.gradientPositionsCw);
 
     HyprlandAPI::reloadConfig();
 

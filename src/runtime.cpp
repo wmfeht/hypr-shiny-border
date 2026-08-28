@@ -159,6 +159,36 @@ void shinyGradientSample(const uint64_t* stops, const float* pos, int count, flo
     }
 }
 
+void shinyGradientResolveCwSide(const uint64_t primaryStops[SHINY_MAX_GRADIENT_STEPS],
+                                const float primaryPos[SHINY_MAX_GRADIENT_STEPS], int primaryCount,
+                                const uint64_t* cwColors, int cwColorCount, const char* cwPosSpec,
+                                ShinyGradientSide& out) {
+    out = ShinyGradientSide{};
+    if (primaryCount < 2 || primaryCount > SHINY_MAX_GRADIENT_STEPS)
+        return; // ramp off — the cw config never activates it on its own
+
+    const int ownCount = shinyGradientStepCount(cwColors ? cwColorCount : 0);
+    if (ownCount >= 2) {
+        out.count = ownCount;
+        for (int i = 0; i < ownCount; i++)
+            out.stops[i] = cwColors[i];
+        // Own colors, own spacing. An empty / invalid spec is even spacing:
+        // the primary positions belong to a different stop list.
+        shinyGradientResolvePositions(cwPosSpec, ownCount, out.pos);
+        return;
+    }
+
+    // Inherit the primary colors; the position spec alone can still
+    // reshape this half. Empty / invalid spec = exact mirror.
+    out.count = primaryCount;
+    for (int i = 0; i < primaryCount; i++)
+        out.stops[i] = primaryStops[i];
+    if (!shinyGradientResolvePositions(cwPosSpec, primaryCount, out.pos)) {
+        for (int i = 0; i < SHINY_MAX_GRADIENT_STEPS; i++)
+            out.pos[i] = primaryPos[i];
+    }
+}
+
 int shinyFallbackExpandPx(int logicalPx, float monitorScale) {
     return static_cast<int>(std::round(static_cast<float>(logicalPx) * monitorScale));
 }

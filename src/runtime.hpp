@@ -105,6 +105,30 @@ bool shinyGradientResolvePositions(const char* spec, int count, float out[SHINY_
 // count < 2 samples stop 0 (or transparent black when count <= 0).
 void shinyGradientSample(const uint64_t* stops, const float* pos, int count, float u, float rgba[4]);
 
+// Clockwise-half override (plugin:shiny-border:gradient_cw /
+// gradient_positions_cw), resolved against the already-resolved primary
+// side. Rules:
+//   - primary ramp off (primaryCount < 2) → count 0, cw config ignored;
+//   - cw colors usable (>= 2 after the step-count clamp) → they replace
+//     the primary colors on that half, positioned by cwPosSpec (empty /
+//     invalid = even spacing — not the primary positions, which may not
+//     even have a matching count);
+//   - cw colors unset → the half inherits the primary colors, and
+//     cwPosSpec alone can still reshape it; empty / invalid spec is an
+//     exact mirror of the primary positions.
+// Nothing forces the first/last cw colors to match the primary side —
+// mismatched endpoints show a seam at the head / far side (documented).
+struct ShinyGradientSide {
+    uint64_t stops[SHINY_MAX_GRADIENT_STEPS] = {};
+    float    pos[SHINY_MAX_GRADIENT_STEPS]   = {};
+    int      count                           = 0;
+};
+
+void shinyGradientResolveCwSide(const uint64_t primaryStops[SHINY_MAX_GRADIENT_STEPS],
+                                const float primaryPos[SHINY_MAX_GRADIENT_STEPS], int primaryCount,
+                                const uint64_t* cwColors, int cwColorCount, const char* cwPosSpec,
+                                ShinyGradientSide& out);
+
 // Shared draw fields both backends consume. Colors are packed Hyprland
 // CHyprColor uint64 (same as sc<uint64_t>(g_cfg.colA->value())).
 // borderSize is logical (unscaled) px — SHADER_THICK / CBorderPassElement
@@ -112,6 +136,10 @@ void shinyGradientSample(const uint64_t* stops, const float* pos, int count, flo
 // stopCount 0 = classic col.a/col.b comet; 2..SHINY_MAX_GRADIENT_STEPS =
 // multi-step ramp through stops[0..stopCount-1] (head → far side), each
 // stop placed at stopPos (normalized, from shinyGradientResolvePositions).
+// The CW trio is the clockwise half (shinyGradientResolveCwSide) — a
+// mirror of the primary side unless gradient_cw / gradient_positions_cw
+// override it. The shader consumes both; the CBorderPassElement fallback
+// is a plain linear gradient and only draws the primary side.
 struct ShinyDrawShared {
     int      rounding      = 0;
     int      outerRound    = 0;
@@ -123,6 +151,9 @@ struct ShinyDrawShared {
     uint64_t stops[SHINY_MAX_GRADIENT_STEPS] = {};
     float    stopPos[SHINY_MAX_GRADIENT_STEPS] = {};
     int      stopCount     = 0;
+    uint64_t stopsCW[SHINY_MAX_GRADIENT_STEPS] = {};
+    float    stopPosCW[SHINY_MAX_GRADIENT_STEPS] = {};
+    int      stopCountCW   = 0;
 };
 
 // Fallback-only: inner-box expand/inset px = round(logical × monitor scale).

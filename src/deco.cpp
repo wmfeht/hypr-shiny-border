@@ -238,7 +238,25 @@ void CShinyBorder::draw(PHLMONITOR pMonitor, float const& a) {
         shared.stops[i] = sc<uint64_t>(gradientCfg.m_colors[sc<size_t>(i)].getAsHex());
     const bool customPos = shinyGradientResolvePositions(g_cfg.gradientPositions->value().c_str(),
                                                          shared.stopCount, shared.stopPos);
-    const auto mapped    = shinyMapDrawBackends(shared, pMonitor->m_scale);
+
+    // Clockwise half: mirrors the primary side unless gradient_cw /
+    // gradient_positions_cw override it. Only the shader can draw the
+    // asymmetry — the fallback linear gradient stays primary-side.
+    const auto& gradientCwCfg = g_cfg.gradientCw->value();
+    uint64_t    cwColors[SHINY_MAX_GRADIENT_STEPS] = {};
+    const int   cwColorCount = shinyGradientStepCount(sc<int>(gradientCwCfg.m_colors.size()));
+    for (int i = 0; i < cwColorCount; i++)
+        cwColors[i] = sc<uint64_t>(gradientCwCfg.m_colors[sc<size_t>(i)].getAsHex());
+    ShinyGradientSide cwSide;
+    shinyGradientResolveCwSide(shared.stops, shared.stopPos, shared.stopCount, cwColors, cwColorCount,
+                               g_cfg.gradientPositionsCw->value().c_str(), cwSide);
+    shared.stopCountCW = cwSide.count;
+    for (int i = 0; i < SHINY_MAX_GRADIENT_STEPS; i++) {
+        shared.stopsCW[i]   = cwSide.stops[i];
+        shared.stopPosCW[i] = cwSide.pos[i];
+    }
+
+    const auto mapped = shinyMapDrawBackends(shared, pMonitor->m_scale);
 
     // Pin replaces the mouse latch entirely; angle_offset still applies.
     const float baseAngle = g_cfg.pin->value()

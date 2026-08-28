@@ -413,6 +413,74 @@ static void checkGradientPositions() {
     CHECK(rgba[2] > 0.9f); // just after: blue heading toward red
 }
 
+static void checkGradientCwSide() {
+    const uint64_t red    = 0xffff0000ULL;
+    const uint64_t green  = 0xff00ff00ULL;
+    const uint64_t blue   = 0xff0000ffULL;
+    const uint64_t white  = 0xffffffffULL;
+
+    // Primary side: red → green → blue at custom positions 0 / 70 / 100.
+    uint64_t primary[SHINY_MAX_GRADIENT_STEPS] = {red, green, blue};
+    float    primaryPos[SHINY_MAX_GRADIENT_STEPS];
+    CHECK(shinyGradientResolvePositions("0 70 100", 3, primaryPos));
+
+    ShinyGradientSide cw;
+
+    // Primary ramp off → the cw config alone never activates the feature.
+    shinyGradientResolveCwSide(primary, primaryPos, 0, primary, 3, "0 50 100", cw);
+    CHECK(cw.count == 0);
+    shinyGradientResolveCwSide(primary, primaryPos, 1, primary, 3, "", cw);
+    CHECK(cw.count == 0);
+
+    // Nothing configured → exact mirror of the primary side, including the
+    // custom positions.
+    shinyGradientResolveCwSide(primary, primaryPos, 3, nullptr, 0, "", cw);
+    CHECK(cw.count == 3);
+    CHECK(cw.stops[0] == red && cw.stops[1] == green && cw.stops[2] == blue);
+    CHECK(cw.pos[1] == primaryPos[1]);
+    CHECK(std::fabs(cw.pos[1] - 0.7f) < 1e-6f);
+
+    // A lone cw color counts as unset (same rule as the primary gradient).
+    shinyGradientResolveCwSide(primary, primaryPos, 3, &white, 1, "", cw);
+    CHECK(cw.count == 3);
+    CHECK(cw.stops[0] == red);
+
+    // positions_cw alone reshapes the half with the inherited colors.
+    shinyGradientResolveCwSide(primary, primaryPos, 3, nullptr, 0, "0 30 100", cw);
+    CHECK(cw.count == 3);
+    CHECK(cw.stops[1] == green);
+    CHECK(std::fabs(cw.pos[1] - 0.3f) < 1e-6f);
+
+    // Invalid spec with inherited colors → mirror, not even spacing.
+    shinyGradientResolveCwSide(primary, primaryPos, 3, nullptr, 0, "0 30", cw);
+    CHECK(std::fabs(cw.pos[1] - 0.7f) < 1e-6f);
+
+    // Own cw colors — the count may differ from the primary side; an empty
+    // spec is even spacing (the primary positions belong to another list).
+    const uint64_t own[] = {red, white};
+    shinyGradientResolveCwSide(primary, primaryPos, 3, own, 2, "", cw);
+    CHECK(cw.count == 2);
+    CHECK(cw.stops[0] == red && cw.stops[1] == white);
+    CHECK(cw.pos[0] == 0.f && cw.pos[1] == 1.f);
+
+    // Own colors + own spec.
+    shinyGradientResolveCwSide(primary, primaryPos, 3, own, 2, "20 80", cw);
+    CHECK(std::fabs(cw.pos[0] - 0.2f) < 1e-6f);
+    CHECK(std::fabs(cw.pos[1] - 0.8f) < 1e-6f);
+
+    // A mismatched spec for own colors falls back to even, not to the
+    // primary positions.
+    shinyGradientResolveCwSide(primary, primaryPos, 3, own, 2, "0 70 100", cw);
+    CHECK(cw.pos[0] == 0.f && cw.pos[1] == 1.f);
+
+    // Over-cap own color count clamps like the primary side.
+    uint64_t many[SHINY_MAX_GRADIENT_STEPS + 1];
+    for (auto& c : many)
+        c = white;
+    shinyGradientResolveCwSide(primary, primaryPos, 3, many, SHINY_MAX_GRADIENT_STEPS + 1, "", cw);
+    CHECK(cw.count == SHINY_MAX_GRADIENT_STEPS);
+}
+
 static void checkEffectiveBorderSize() {
     CHECK(shinyEffectiveBorderSize(3, false) == 0);
     CHECK(shinyEffectiveBorderSize(3, true) == 3);
@@ -469,6 +537,7 @@ int main() {
     checkShimmer();
     checkGradient();
     checkGradientPositions();
+    checkGradientCwSide();
     checkEffectiveBorderSize();
     checkUpdateWindowActions();
 

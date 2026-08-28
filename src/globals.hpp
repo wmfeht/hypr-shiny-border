@@ -35,6 +35,11 @@ struct SShinyConfig {
     // Per-stop positions, one percentage per gradient color ("0 70 100").
     // Empty (default), count mismatch, or junk = even spacing.
     SP<Config::Values::CStringValue>   gradientPositions;
+    // Clockwise-half override. Unset (single-color default / empty spec)
+    // mirrors the primary side; gradient_positions_cw alone reshapes the
+    // half with the primary colors. Only active while gradient is on.
+    SP<Config::Values::CGradientValue> gradientCw;
+    SP<Config::Values::CStringValue>   gradientPositionsCw;
     // Pointer into Hyprland's CConfigValueBase::registry(). Bound in
     // PLUGIN_INIT, reset in PLUGIN_EXIT — must not be a function-local static
     // (that destructor runs during dlclose; flushCaches() can UAF).
